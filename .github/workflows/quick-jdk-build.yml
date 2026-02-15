@@ -67,7 +67,7 @@ jobs:
       - name: Configure JDK
         run: |
           bash configure \
-            --with-boot-jdk=/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21*/x64 \
+            --with-boot-jdk=$JAVA_HOME \
             --with-native-debug-symbols=none \
             --with-debug-level=release \
             --with-version-opt="spark-opt-$(git rev-parse --short HEAD)" \
