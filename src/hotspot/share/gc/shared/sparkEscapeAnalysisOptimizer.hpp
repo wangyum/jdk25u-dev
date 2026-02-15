@@ -25,6 +25,7 @@
 #ifndef SHARE_GC_SHARED_SPARKESCAPEANALYSISOPTIMIZER_HPP
 #define SHARE_GC_SHARED_SPARKESCAPEANALYSISOPTIMIZER_HPP
 
+#include "gc/g1/g1_globals.hpp"
 #include "memory/allStatic.hpp"
 #include "utilities/globalDefinitions.hpp"
 
