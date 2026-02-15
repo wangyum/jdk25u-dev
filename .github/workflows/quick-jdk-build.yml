@@ -152,6 +152,7 @@ jobs:
 
           echo "=== Running with Spark optimizations enabled ==="
           $BUILD_DIR/jdk/bin/java \
+            -Xshare:off \
             -XX:+UseG1GC \
             -XX:+UnlockExperimentalVMOptions \
             -XX:+G1OptimizeForSpark \
@@ -160,6 +161,7 @@ jobs:
 
           echo "=== Running with baseline (optimizations disabled) ==="
           $BUILD_DIR/jdk/bin/java \
+            -Xshare:off \
             -XX:+UseG1GC \
             -XX:+UnlockExperimentalVMOptions \
             -XX:-G1OptimizeForSpark \
