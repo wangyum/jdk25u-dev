@@ -23,7 +23,6 @@
  */
 
 #include "gc/shared/sparkTLABOptimizer.hpp"
-#include "gc/g1/g1_globals.hpp"
 #include "logging/log.hpp"
 #include "runtime/javaThread.hpp"
 #include "runtime/thread.hpp"
@@ -111,7 +110,7 @@ size_t SparkTLABOptimizer::calculate_tlab_size(Thread* thread,
   uintx thread_multiplier = get_thread_tlab_multiplier(thread);
   if (thread_multiplier > 1) {
     optimized_size *= thread_multiplier;
-    log_trace(gc, tlab)("Spark TLAB: Thread multiplier %ux applied for %s",
+    log_trace(gc, tlab)("Spark TLAB: Thread multiplier %lux applied for %s",
                         thread_multiplier,
                         thread->is_Java_thread() ?
                         JavaThread::cast(thread)->name() : "unknown");
@@ -123,7 +122,7 @@ size_t SparkTLABOptimizer::calculate_tlab_size(Thread* thread,
     size_t boosted_size = MAX2(optimized_size, boost);
 
     log_trace(gc, tlab)("Spark TLAB: High allocation rate detected (%.2f%%), "
-                        "boosting size from " SIZE_FORMAT " to " SIZE_FORMAT,
+                        "boosting size from %zu to %zu",
                         allocation_fraction * 100.0,
                         optimized_size,
                         boosted_size);
@@ -167,7 +166,7 @@ void SparkTLABOptimizer::log_optimization(Thread* thread,
                               JavaThread::cast(thread)->name() : "unknown";
 
     log_debug(gc, tlab)("Spark TLAB optimization: thread=%s, "
-                        "original=" SIZE_FORMAT ", optimized=" SIZE_FORMAT ", "
+                        "original=%zu, optimized=%zu, "
                         "reason=%s",
                         thread_name, original_size, optimized_size, reason);
   }

@@ -25,8 +25,8 @@
 #ifndef SHARE_GC_SHARED_SPARKESCAPEANALYSISOPTIMIZER_HPP
 #define SHARE_GC_SHARED_SPARKESCAPEANALYSISOPTIMIZER_HPP
 
-#include "gc/g1/g1_globals.hpp"
 #include "memory/allStatic.hpp"
+#include "runtime/globals.hpp"
 #include "utilities/globalDefinitions.hpp"
 
 // Spark-specific escape analysis optimization

@@ -23,7 +23,6 @@
  */
 
 #include "gc/shared/sparkEscapeAnalysisOptimizer.hpp"
-#include "gc/g1/g1_globals.hpp"
 #include "logging/log.hpp"
 #include "runtime/globals.hpp"
 #include "utilities/globalDefinitions.hpp"
@@ -44,9 +43,9 @@ void SparkEscapeAnalysisOptimizer::initialize() {
   }
 
   log_info(gc, init)("Spark Escape Analysis Enhancement enabled");
-  log_info(gc, init)("  Scalar Replacement Threshold: " SIZE_FORMAT " fields",
+  log_info(gc, init)("  Scalar Replacement Threshold: %zu fields",
                      G1SparkScalarReplacementThreshold);
-  log_info(gc, init)("  Stack Allocation Limit: " SIZE_FORMAT " bytes",
+  log_info(gc, init)("  Stack Allocation Limit: %zu bytes",
                      G1SparkStackAllocationLimit);
 
   // Reset statistics
@@ -249,21 +248,21 @@ void SparkEscapeAnalysisOptimizer::record_allocation_eliminated(const char* clas
     _expression_eliminations++;
   }
 
-  log_trace(gc)("Spark EA: Eliminated allocation of %s (" SIZE_FORMAT " bytes)",
+  log_trace(gc)("Spark EA: Eliminated allocation of %s (%zu bytes)",
                 class_name, size);
 }
 
 void SparkEscapeAnalysisOptimizer::record_scalar_replacement(const char* class_name,
                                                               size_t field_count) {
   _scalar_replacements++;
-  log_trace(gc)("Spark EA: Scalar replacement of %s (" SIZE_FORMAT " fields)",
+  log_trace(gc)("Spark EA: Scalar replacement of %s (%zu fields)",
                 class_name, field_count);
 }
 
 void SparkEscapeAnalysisOptimizer::record_stack_allocation(const char* class_name,
                                                             size_t size) {
   _stack_allocations++;
-  log_trace(gc)("Spark EA: Stack allocation of %s (" SIZE_FORMAT " bytes)",
+  log_trace(gc)("Spark EA: Stack allocation of %s (%zu bytes)",
                 class_name, size);
 }
 
@@ -277,12 +276,12 @@ void SparkEscapeAnalysisOptimizer::print_statistics() {
   }
 
   log_info(gc)("Spark Escape Analysis Statistics:");
-  log_info(gc)("  Total allocations eliminated: " SIZE_FORMAT,
+  log_info(gc)("  Total allocations eliminated: %zu",
                _total_allocations_eliminated);
-  log_info(gc)("  Bytes saved: " SIZE_FORMAT " (%.2f MB)",
+  log_info(gc)("  Bytes saved: %zu (%.2f MB)",
                _bytes_saved, _bytes_saved / (1024.0 * 1024.0));
-  log_info(gc)("  Scalar replacements: " SIZE_FORMAT, _scalar_replacements);
-  log_info(gc)("  Stack allocations: " SIZE_FORMAT, _stack_allocations);
+  log_info(gc)("  Scalar replacements: %zu", _scalar_replacements);
+  log_info(gc)("  Stack allocations: %zu", _stack_allocations);
 
   if (_total_allocations_eliminated > 0) {
     double internal_row_percent = 100.0 * _internal_row_eliminations / _total_allocations_eliminated;
@@ -290,11 +289,11 @@ void SparkEscapeAnalysisOptimizer::print_statistics() {
     double expression_percent = 100.0 * _expression_eliminations / _total_allocations_eliminated;
 
     log_info(gc)("  Elimination by type:");
-    log_info(gc)("    InternalRow: " SIZE_FORMAT " (%.1f%%)",
+    log_info(gc)("    InternalRow: %zu (%.1f%%)",
                  _internal_row_eliminations, internal_row_percent);
-    log_info(gc)("    Iterator: " SIZE_FORMAT " (%.1f%%)",
+    log_info(gc)("    Iterator: %zu (%.1f%%)",
                  _iterator_eliminations, iterator_percent);
-    log_info(gc)("    Expression: " SIZE_FORMAT " (%.1f%%)",
+    log_info(gc)("    Expression: %zu (%.1f%%)",
                  _expression_eliminations, expression_percent);
   }
 }

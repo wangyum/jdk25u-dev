@@ -23,7 +23,6 @@
  */
 
 #include "gc/shared/sparkStringDedupOptimizer.hpp"
-#include "gc/g1/g1_globals.hpp"
 #include "logging/log.hpp"
 #include "runtime/globals.hpp"
 #include "utilities/globalDefinitions.hpp"
@@ -68,8 +67,8 @@ size_t SparkStringDedupOptimizer::get_initial_table_size(size_t default_size) {
   // Multiply by SparkStringDedupTableSizeMultiplier (default 4)
   size_t optimized_size = default_size * G1SparkStringDedupTableSizeMultiplier;
 
-  log_trace(gc, stringdedup)("Spark String Dedup: Initial table size " SIZE_FORMAT
-                              " (default: " SIZE_FORMAT ", multiplier: %u)",
+  log_trace(gc, stringdedup)("Spark String Dedup: Initial table size %zu "
+                              "(default: %zu, multiplier: %u)",
                               optimized_size, default_size,
                               G1SparkStringDedupTableSizeMultiplier);
 
@@ -136,8 +135,8 @@ size_t SparkStringDedupOptimizer::get_cleanup_dead_minimum(size_t default_minimu
   // Default: 1024, Spark: 512
   size_t spark_minimum = default_minimum / 2;
 
-  log_trace(gc, stringdedup)("Spark String Dedup: Cleanup dead minimum " SIZE_FORMAT
-                              " (default: " SIZE_FORMAT ")",
+  log_trace(gc, stringdedup)("Spark String Dedup: Cleanup dead minimum %zu "
+                              "(default: %zu)",
                               spark_minimum, default_minimum);
 
   return spark_minimum;
@@ -294,12 +293,12 @@ void SparkStringDedupOptimizer::print_statistics() {
   double spark_pattern_percent = 100.0 * _spark_pattern_candidates / _total_candidates;
 
   log_info(gc, stringdedup)("Spark String Dedup Statistics:");
-  log_info(gc, stringdedup)("  Total candidates: " SIZE_FORMAT, _total_candidates);
-  log_info(gc, stringdedup)("  Spark patterns: " SIZE_FORMAT " (%.1f%%)",
+  log_info(gc, stringdedup)("  Total candidates: %zu", _total_candidates);
+  log_info(gc, stringdedup)("  Spark patterns: %zu (%.1f%%)",
                             _spark_pattern_candidates, spark_pattern_percent);
-  log_info(gc, stringdedup)("  SQL keywords: " SIZE_FORMAT, _sql_keyword_count);
-  log_info(gc, stringdedup)("  Partition patterns: " SIZE_FORMAT, _partition_pattern_count);
-  log_info(gc, stringdedup)("  Column names: " SIZE_FORMAT, _column_name_count);
+  log_info(gc, stringdedup)("  SQL keywords: %zu", _sql_keyword_count);
+  log_info(gc, stringdedup)("  Partition patterns: %zu", _partition_pattern_count);
+  log_info(gc, stringdedup)("  Column names: %zu", _column_name_count);
 }
 
 void SparkStringDedupOptimizer::log_optimization(const char* phase,
@@ -308,7 +307,7 @@ void SparkStringDedupOptimizer::log_optimization(const char* phase,
                                                   const char* reason) {
   if (log_is_enabled(Debug, gc, stringdedup)) {
     log_debug(gc, stringdedup)("Spark String Dedup optimization: phase=%s, "
-                               "original=" SIZE_FORMAT ", optimized=" SIZE_FORMAT ", "
+                               "original=%zu, optimized=%zu, "
                                "reason=%s",
                                phase, original_value, optimized_value, reason);
   }

@@ -23,7 +23,6 @@
  */
 
 #include "gc/shared/sparkHashOptimizer.hpp"
-#include "gc/g1/g1_globals.hpp"
 #include "logging/log.hpp"
 #include "runtime/globals.hpp"
 #include "utilities/globalDefinitions.hpp"
@@ -147,7 +146,7 @@ void SparkHashOptimizer::record_hash_computation(const char* operation, size_t d
     }
   }
 
-  log_trace(gc)("Spark Hash: %s, size=" SIZE_FORMAT, operation, data_size);
+  log_trace(gc)("Spark Hash: %s, size=%zu", operation, data_size);
 }
 
 void SparkHashOptimizer::record_hash_cache_hit() {
@@ -172,19 +171,19 @@ void SparkHashOptimizer::print_statistics() {
   double join_percent = 100.0 * _join_hash_count / _total_hash_computations;
 
   log_info(gc)("Spark Hash Optimizer Statistics:");
-  log_info(gc)("  Total hash computations: " SIZE_FORMAT, _total_hash_computations);
-  log_info(gc)("  Partition hashes: " SIZE_FORMAT " (%.1f%%)",
+  log_info(gc)("  Total hash computations: %zu", _total_hash_computations);
+  log_info(gc)("  Partition hashes: %zu (%.1f%%)",
                _partition_hash_count, partition_percent);
-  log_info(gc)("  Aggregation hashes: " SIZE_FORMAT " (%.1f%%)",
+  log_info(gc)("  Aggregation hashes: %zu (%.1f%%)",
                _aggregation_hash_count, aggregation_percent);
-  log_info(gc)("  Join hashes: " SIZE_FORMAT " (%.1f%%)",
+  log_info(gc)("  Join hashes: %zu (%.1f%%)",
                _join_hash_count, join_percent);
 
   if (G1SparkEnableHashCaching) {
     size_t total_cache_ops = _cache_hits + _cache_misses;
     if (total_cache_ops > 0) {
       double hit_rate = 100.0 * _cache_hits / total_cache_ops;
-      log_info(gc)("  Cache hits: " SIZE_FORMAT ", misses: " SIZE_FORMAT " (%.1f%% hit rate)",
+      log_info(gc)("  Cache hits: %zu, misses: %zu (%.1f%% hit rate)",
                    _cache_hits, _cache_misses, hit_rate);
     }
   }

@@ -25,6 +25,7 @@
 #ifndef SHARE_GC_SHARED_SPARKTLABOPTIMIZER_HPP
 #define SHARE_GC_SHARED_SPARKTLABOPTIMIZER_HPP
 
+#include "gc/shared/tlab_globals.hpp"
 #include "memory/allocation.hpp"
 #include "runtime/thread.hpp"
 #include "utilities/globalDefinitions.hpp"

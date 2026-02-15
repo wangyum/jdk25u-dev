@@ -26,6 +26,7 @@
 #define SHARE_GC_SHARED_SPARKSTRINGDEDUPOPTIMIZER_HPP
 
 #include "memory/allStatic.hpp"
+#include "runtime/globals.hpp"
 #include "utilities/globalDefinitions.hpp"
 
 class Thread;
