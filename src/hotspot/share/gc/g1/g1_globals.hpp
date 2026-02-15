@@ -379,6 +379,12 @@
           "Lower than default (3) to deduplicate strings sooner.")          \
           range(1, max_juint)                                               \
                                                                             \
+  product(uint, G1SparkStringDedupTableSizeMultiplier, 4, EXPERIMENTAL,     \
+          "String dedup table size multiplier for Spark workloads. "        \
+          "Spark generates massive amounts of strings (column names, SQL, " \
+          "partition values), needs larger initial hash table.")            \
+          range(1, 16)                                                      \
+                                                                            \
   product(uint, G1SparkReservePercent, 15, EXPERIMENTAL,                    \
           "Heap reserve percentage when G1OptimizeForSpark is enabled. "    \
           "Higher than default (10%) to handle Spark's bursty allocation "  \

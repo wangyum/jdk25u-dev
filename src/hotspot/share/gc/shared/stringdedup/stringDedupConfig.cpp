@@ -24,6 +24,7 @@
 
 #include "classfile/altHashing.hpp"
 #include "gc/shared/stringdedup/stringDedupConfig.hpp"
+#include "gc/shared/sparkStringDedupOptimizer.hpp"
 #include "logging/log.hpp"
 #include "runtime/flags/jvmFlag.hpp"
 #include "runtime/globals.hpp"
@@ -154,12 +155,42 @@ bool StringDedup::Config::ergo_initialize() {
 }
 
 void StringDedup::Config::initialize() {
-  _initial_table_size = good_size(StringDeduplicationInitialTableSize);
-  _age_threshold = StringDeduplicationAgeThreshold;
-  _load_factor_for_growth = StringDeduplicationGrowTableLoad;
-  _load_factor_for_shrink = StringDeduplicationShrinkTableLoad;
-  _load_factor_target = StringDeduplicationTargetTableLoad;
-  _minimum_dead_for_cleanup = StringDeduplicationCleanupDeadMinimum;
-  _dead_factor_for_cleanup = StringDeduplicationCleanupDeadPercent / 100.0;
+  // Apply Spark optimizations if enabled
+  size_t initial_size = StringDeduplicationInitialTableSize;
+  if (SparkStringDedupOptimizer::is_enabled()) {
+    initial_size = SparkStringDedupOptimizer::get_initial_table_size(initial_size);
+  }
+  _initial_table_size = good_size(initial_size);
+
+  // Use Spark age threshold if enabled
+  _age_threshold = SparkStringDedupOptimizer::is_enabled() ?
+                   SparkStringDedupOptimizer::get_age_threshold() :
+                   StringDeduplicationAgeThreshold;
+
+  // Apply Spark load factor optimizations
+  if (SparkStringDedupOptimizer::is_enabled()) {
+    _load_factor_for_growth = SparkStringDedupOptimizer::get_grow_load_factor(
+        StringDeduplicationGrowTableLoad);
+    _load_factor_for_shrink = SparkStringDedupOptimizer::get_shrink_load_factor(
+        StringDeduplicationShrinkTableLoad);
+    _load_factor_target = SparkStringDedupOptimizer::get_target_load_factor(
+        StringDeduplicationTargetTableLoad);
+    _minimum_dead_for_cleanup = SparkStringDedupOptimizer::get_cleanup_dead_minimum(
+        StringDeduplicationCleanupDeadMinimum);
+    _dead_factor_for_cleanup = SparkStringDedupOptimizer::get_cleanup_dead_percent(
+        StringDeduplicationCleanupDeadPercent) / 100.0;
+  } else {
+    _load_factor_for_growth = StringDeduplicationGrowTableLoad;
+    _load_factor_for_shrink = StringDeduplicationShrinkTableLoad;
+    _load_factor_target = StringDeduplicationTargetTableLoad;
+    _minimum_dead_for_cleanup = StringDeduplicationCleanupDeadMinimum;
+    _dead_factor_for_cleanup = StringDeduplicationCleanupDeadPercent / 100.0;
+  }
+
   _hash_seed = initial_hash_seed();
+
+  // Initialize Spark optimizer
+  if (SparkStringDedupOptimizer::is_enabled()) {
+    SparkStringDedupOptimizer::initialize();
+  }
 }
