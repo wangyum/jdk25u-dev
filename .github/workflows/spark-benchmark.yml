@@ -61,10 +61,18 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
+      - name: Set Boot JDK path
+        run: |
+          # Find the actual boot JDK path (wildcard expansion)
+          BOOT_JDK=$(find /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk -maxdepth 2 -type d -name "x64" | head -1)
+          echo "BOOT_JDK=$BOOT_JDK" >> $GITHUB_ENV
+          echo "Boot JDK found at: $BOOT_JDK"
+          $BOOT_JDK/bin/java -version
+
       - name: Configure JDK build
         run: |
           bash configure \
-            --with-boot-jdk=/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21*/x64 \
+            --with-boot-jdk=$BOOT_JDK \
             --with-native-debug-symbols=none \
             --with-debug-level=release \
             --with-version-opt="spark-optimized" \
