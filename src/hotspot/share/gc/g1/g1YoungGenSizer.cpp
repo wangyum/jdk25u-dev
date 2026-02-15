@@ -71,12 +71,14 @@ G1YoungGenSizer::G1YoungGenSizer() : _sizer_kind(SizerDefaults),
 }
 
 uint G1YoungGenSizer::calculate_default_min_length(uint new_number_of_heap_regions) {
-  uint default_value = (new_number_of_heap_regions * G1NewSizePercent) / 100;
+  uint percent = G1OptimizeForSpark ? G1SparkYoungGenMinPercent : G1NewSizePercent;
+  uint default_value = (new_number_of_heap_regions * percent) / 100;
   return MAX2(1U, default_value);
 }
 
 uint G1YoungGenSizer::calculate_default_max_length(uint new_number_of_heap_regions) {
-  uint default_value = (new_number_of_heap_regions * G1MaxNewSizePercent) / 100;
+  uint percent = G1OptimizeForSpark ? G1SparkYoungGenMaxPercent : G1MaxNewSizePercent;
+  uint default_value = (new_number_of_heap_regions * percent) / 100;
   return MAX2(1U, default_value);
 }
 

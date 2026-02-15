@@ -343,6 +343,53 @@
           "scan cost related prediction samples. A sample must involve "    \
           "the same or more than this number of code roots to be used.")    \
                                                                             \
+  /* Apache Spark SQL Optimizations */                                     \
+  product(bool, G1OptimizeForSpark, false,                                  \
+          "Enable G1GC optimizations for Apache Spark SQL workloads. "      \
+          "Adjusts young generation sizing, IHOP, and string deduplication "\
+          "to better handle Spark's allocation patterns.")                  \
+                                                                            \
+  product(uint, G1SparkYoungGenMinPercent, 10, EXPERIMENTAL,                \
+          "Minimum young generation size as percentage of heap when "       \
+          "G1OptimizeForSpark is enabled. Spark has high allocation rates " \
+          "during map/shuffle phases.")                                     \
+          range(5, 95)                                                      \
+          constraint(G1NewSizePercentConstraintFunc,AfterErgo)              \
+                                                                            \
+  product(uint, G1SparkYoungGenMaxPercent, 70, EXPERIMENTAL,                \
+          "Maximum young generation size as percentage of heap when "       \
+          "G1OptimizeForSpark is enabled. Larger young gen reduces "        \
+          "promotions of short-lived Spark objects.")                       \
+          range(5, 95)                                                      \
+          constraint(G1MaxNewSizePercentConstraintFunc,AfterErgo)           \
+                                                                            \
+  product(uint, G1SparkInitiatingHeapOccupancyPercent, 30, EXPERIMENTAL,    \
+          "Initiating heap occupancy percentage for concurrent marking "    \
+          "when G1OptimizeForSpark is enabled. Lower than default (45%) "   \
+          "to start marking earlier, avoiding full GCs in Spark workloads.")\
+          range(1, 100)                                                     \
+                                                                            \
+  product(bool, G1SparkAggressiveStringDedup, true, EXPERIMENTAL,           \
+          "Enable more aggressive string deduplication for Spark SQL. "     \
+          "Spark SQL processes many duplicate strings (column names, "      \
+          "SQL text, partition values).")                                   \
+                                                                            \
+  product(uint, G1SparkStringDedupAgeThreshold, 1, EXPERIMENTAL,            \
+          "String deduplication age threshold for Spark workloads. "        \
+          "Lower than default (3) to deduplicate strings sooner.")          \
+          range(1, max_juint)                                               \
+                                                                            \
+  product(uint, G1SparkReservePercent, 15, EXPERIMENTAL,                    \
+          "Heap reserve percentage when G1OptimizeForSpark is enabled. "    \
+          "Higher than default (10%) to handle Spark's bursty allocation "  \
+          "during shuffle operations.")                                     \
+          range(0, 50)                                                      \
+                                                                            \
+  product(uintx, G1SparkTLABSizeMultiplier, 3, EXPERIMENTAL,                \
+          "TLAB size multiplier for Spark executor threads. Spark has "     \
+          "high per-thread allocation rates during task processing.")       \
+          range(1, 10)                                                      \
+                                                                            \
   GC_G1_EVACUATION_FAILURE_FLAGS(develop,                                   \
                     develop_pd,                                             \
                     product,                                                \

@@ -277,6 +277,13 @@ size_t ThreadLocalAllocBuffer::initial_desired_size() {
   // inconsistencies between those will be caught by following AfterMemoryInit
   // constraint checking.
   init_sz = MIN2(MAX2(init_sz, min_size()), max_size());
+
+  // Apply Spark optimization: larger TLABs for high allocation rate workloads
+  if (G1OptimizeForSpark && UseG1GC) {
+    init_sz *= G1SparkTLABSizeMultiplier;
+    init_sz = MIN2(init_sz, max_size()); // Re-check max after multiplication
+  }
+
   return init_sz;
 }
 

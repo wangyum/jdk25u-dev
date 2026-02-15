@@ -63,7 +63,7 @@ G1Policy::G1Policy(STWGCTimer* gc_timer) :
   _young_list_target_length(0),
   _eden_surv_rate_group(new G1SurvRateGroup()),
   _survivor_surv_rate_group(new G1SurvRateGroup()),
-  _reserve_factor((double) G1ReservePercent / 100.0),
+  _reserve_factor((double) (G1OptimizeForSpark ? G1SparkReservePercent : G1ReservePercent) / 100.0),
   _reserve_regions(0),
   _young_gen_sizer(),
   _free_regions_at_end_of_collection(0),
@@ -93,6 +93,25 @@ void G1Policy::init(G1CollectedHeap* g1h, G1CollectionSet* collection_set) {
   _collection_set = collection_set;
 
   assert(Heap_lock->owned_by_self(), "Locking discipline.");
+
+  // Apply Spark optimizations if enabled
+  if (G1OptimizeForSpark) {
+    log_info(gc, init)("G1 Spark Optimizations: ENABLED");
+    log_info(gc, init)("  Young Gen: %u%% - %u%% (default: %u%% - %u%%)",
+                       G1SparkYoungGenMinPercent, G1SparkYoungGenMaxPercent,
+                       G1NewSizePercent, G1MaxNewSizePercent);
+    log_info(gc, init)("  IHOP: %u%% (default: %u%%)",
+                       G1SparkInitiatingHeapOccupancyPercent,
+                       InitiatingHeapOccupancyPercent);
+    log_info(gc, init)("  Reserve: %u%% (default: %u%%)",
+                       G1SparkReservePercent, G1ReservePercent);
+    log_info(gc, init)("  TLAB Multiplier: %ux", G1SparkTLABSizeMultiplier);
+
+    if (G1SparkAggressiveStringDedup) {
+      log_info(gc, init)("  Aggressive String Deduplication: enabled (age threshold: %u)",
+                         G1SparkStringDedupAgeThreshold);
+    }
+  }
 
   _young_gen_sizer.adjust_max_new_size(_g1h->max_num_regions());
 
@@ -997,14 +1016,20 @@ void G1Policy::record_young_collection_end(bool concurrent_operation_is_full_mar
 
 G1IHOPControl* G1Policy::create_ihop_control(const G1OldGenAllocationTracker* old_gen_alloc_tracker,
                                              const G1Predictions* predictor) {
+  // Use Spark-optimized IHOP if enabled
+  double ihop_percent = G1OptimizeForSpark ? G1SparkInitiatingHeapOccupancyPercent
+                                           : InitiatingHeapOccupancyPercent;
+  double reserve_percent = G1OptimizeForSpark ? G1SparkReservePercent
+                                              : G1ReservePercent;
+
   if (G1UseAdaptiveIHOP) {
-    return new G1AdaptiveIHOPControl(InitiatingHeapOccupancyPercent,
+    return new G1AdaptiveIHOPControl(ihop_percent,
                                      old_gen_alloc_tracker,
                                      predictor,
-                                     G1ReservePercent,
+                                     reserve_percent,
                                      G1HeapWastePercent);
   } else {
-    return new G1StaticIHOPControl(InitiatingHeapOccupancyPercent, old_gen_alloc_tracker);
+    return new G1StaticIHOPControl(ihop_percent, old_gen_alloc_tracker);
   }
 }
 
