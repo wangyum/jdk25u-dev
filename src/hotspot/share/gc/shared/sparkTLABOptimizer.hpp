@@ -62,14 +62,10 @@ private:
 
 public:
   // Check if Spark adaptive TLAB is enabled
-  static bool is_enabled() {
-    return SparkAdaptiveTLAB;
-  }
+  static bool is_enabled();
 
   // Check if thread detection is enabled
-  static bool is_thread_detection_enabled() {
-    return SparkTLABThreadDetection;
-  }
+  static bool is_thread_detection_enabled();
 
   // Calculate optimal TLAB size for a thread
   static size_t calculate_tlab_size(Thread* thread,

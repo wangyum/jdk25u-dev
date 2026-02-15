@@ -53,9 +53,7 @@
 class SparkEscapeAnalysisOptimizer : public AllStatic {
 public:
   // Check if Spark escape analysis optimizations are enabled
-  static bool is_enabled() {
-    return G1OptimizeForSpark && G1SparkEnhanceEscapeAnalysis;
-  }
+  static bool is_enabled();
 
   // Initialize Spark escape analysis optimizer
   // Called during VM initialization

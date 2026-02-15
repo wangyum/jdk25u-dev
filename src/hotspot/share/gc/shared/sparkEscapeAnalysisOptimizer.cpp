@@ -23,6 +23,7 @@
  */
 
 #include "gc/shared/sparkEscapeAnalysisOptimizer.hpp"
+#include "gc/g1/g1_globals.hpp"
 #include "logging/log.hpp"
 #include "runtime/globals.hpp"
 #include "utilities/globalDefinitions.hpp"
@@ -36,6 +37,10 @@ size_t SparkEscapeAnalysisOptimizer::_internal_row_eliminations = 0;
 size_t SparkEscapeAnalysisOptimizer::_iterator_eliminations = 0;
 size_t SparkEscapeAnalysisOptimizer::_expression_eliminations = 0;
 size_t SparkEscapeAnalysisOptimizer::_bytes_saved = 0;
+
+bool SparkEscapeAnalysisOptimizer::is_enabled() {
+  return G1OptimizeForSpark && G1SparkEnhanceEscapeAnalysis;
+}
 
 void SparkEscapeAnalysisOptimizer::initialize() {
   if (!is_enabled()) {

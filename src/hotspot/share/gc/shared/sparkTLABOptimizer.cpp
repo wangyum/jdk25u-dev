@@ -28,6 +28,14 @@
 #include "runtime/thread.hpp"
 #include "gc/shared/tlab_globals.hpp"
 
+bool SparkTLABOptimizer::is_enabled() {
+  return SparkAdaptiveTLAB;
+}
+
+bool SparkTLABOptimizer::is_thread_detection_enabled() {
+  return SparkTLABThreadDetection;
+}
+
 bool SparkTLABOptimizer::is_spark_executor_thread(Thread* thread) {
   if (!thread->is_Java_thread()) {
     return false;

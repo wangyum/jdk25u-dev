@@ -48,9 +48,7 @@ class Thread;
 class SparkStringDedupOptimizer : public AllStatic {
 public:
   // Check if Spark-optimized string deduplication is enabled
-  static bool is_enabled() {
-    return UseStringDeduplication && G1OptimizeForSpark && G1SparkAggressiveStringDedup;
-  }
+  static bool is_enabled();
 
   // Get optimized age threshold for string deduplication
   // Spark benefit: Deduplicate strings sooner (age 1 vs default 3)

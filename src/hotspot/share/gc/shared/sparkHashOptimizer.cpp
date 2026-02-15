@@ -23,6 +23,7 @@
  */
 
 #include "gc/shared/sparkHashOptimizer.hpp"
+#include "gc/g1/g1_globals.hpp"
 #include "logging/log.hpp"
 #include "runtime/globals.hpp"
 #include "utilities/globalDefinitions.hpp"
@@ -35,6 +36,10 @@ size_t SparkHashOptimizer::_aggregation_hash_count = 0;
 size_t SparkHashOptimizer::_join_hash_count = 0;
 size_t SparkHashOptimizer::_cache_hits = 0;
 size_t SparkHashOptimizer::_cache_misses = 0;
+
+bool SparkHashOptimizer::is_enabled() {
+  return G1OptimizeForSpark && G1SparkOptimizeHashOperations;
+}
 
 void SparkHashOptimizer::initialize() {
   if (!is_enabled()) {

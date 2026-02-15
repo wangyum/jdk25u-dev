@@ -47,9 +47,7 @@
 class SparkHashOptimizer : public AllStatic {
 public:
   // Check if Spark hash optimizations are enabled
-  static bool is_enabled() {
-    return G1OptimizeForSpark && G1SparkOptimizeHashOperations;
-  }
+  static bool is_enabled();
 
   // Initialize Spark hash optimizer
   // Called during VM initialization

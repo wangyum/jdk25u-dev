@@ -23,6 +23,7 @@
  */
 
 #include "gc/shared/sparkStringDedupOptimizer.hpp"
+#include "gc/g1/g1_globals.hpp"
 #include "logging/log.hpp"
 #include "runtime/globals.hpp"
 #include "utilities/globalDefinitions.hpp"
@@ -35,6 +36,10 @@ size_t SparkStringDedupOptimizer::_spark_pattern_candidates = 0;
 size_t SparkStringDedupOptimizer::_sql_keyword_count = 0;
 size_t SparkStringDedupOptimizer::_partition_pattern_count = 0;
 size_t SparkStringDedupOptimizer::_column_name_count = 0;
+
+bool SparkStringDedupOptimizer::is_enabled() {
+  return UseStringDeduplication && G1OptimizeForSpark && G1SparkAggressiveStringDedup;
+}
 
 int SparkStringDedupOptimizer::get_age_threshold() {
   if (!is_enabled()) {
