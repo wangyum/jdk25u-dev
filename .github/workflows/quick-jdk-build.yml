@@ -81,8 +81,8 @@ jobs:
 
       - name: Test JDK build
         run: |
-          $BUILD_DIR/jdk/bin/java -version
-          $BUILD_DIR/jdk/bin/java -version 2>&1 | grep "spark-opt"
+          $BUILD_DIR/jdk/bin/java -Xshare:off -version
+          $BUILD_DIR/jdk/bin/java -Xshare:off -version 2>&1 | grep "spark-opt"
 
       - name: Verify Spark optimization flags
         run: |
@@ -90,32 +90,32 @@ jobs:
 
           # Phase 1: GC Optimization (8 flags)
           echo "Phase 1 - GC Optimization:"
-          $BUILD_DIR/jdk/bin/java -XX:+UnlockExperimentalVMOptions -XX:+PrintFlagsFinal -version 2>&1 | \
+          $BUILD_DIR/jdk/bin/java -Xshare:off -XX:+UnlockExperimentalVMOptions -XX:+PrintFlagsFinal -version 2>&1 | \
             grep "G1OptimizeForSpark\|G1SparkYoungRegionMultiplier\|G1SparkOldRegionMultiplier" | head -3
 
           # Phase 2: TLAB Optimization (7 flags)
           echo "Phase 2 - TLAB Optimization:"
-          $BUILD_DIR/jdk/bin/java -XX:+UnlockExperimentalVMOptions -XX:+PrintFlagsFinal -version 2>&1 | \
+          $BUILD_DIR/jdk/bin/java -Xshare:off -XX:+UnlockExperimentalVMOptions -XX:+PrintFlagsFinal -version 2>&1 | \
             grep "SparkAdaptiveTLAB\|SparkExecutorTLABMultiplier" | head -2
 
           # Phase 3: String Deduplication (3 flags)
           echo "Phase 3 - String Dedup:"
-          $BUILD_DIR/jdk/bin/java -XX:+UnlockExperimentalVMOptions -XX:+PrintFlagsFinal -version 2>&1 | \
+          $BUILD_DIR/jdk/bin/java -Xshare:off -XX:+UnlockExperimentalVMOptions -XX:+PrintFlagsFinal -version 2>&1 | \
             grep "G1SparkStringDedup" | head -2
 
           # Phase 4: Hash Intrinsics (3 flags)
           echo "Phase 4 - Hash Optimization:"
-          $BUILD_DIR/jdk/bin/java -XX:+UnlockExperimentalVMOptions -XX:+PrintFlagsFinal -version 2>&1 | \
+          $BUILD_DIR/jdk/bin/java -Xshare:off -XX:+UnlockExperimentalVMOptions -XX:+PrintFlagsFinal -version 2>&1 | \
             grep "G1SparkOptimizeHash" | head -2
 
           # Phase 5: Escape Analysis (3 flags)
           echo "Phase 5 - Escape Analysis:"
-          $BUILD_DIR/jdk/bin/java -XX:+UnlockExperimentalVMOptions -XX:+PrintFlagsFinal -version 2>&1 | \
+          $BUILD_DIR/jdk/bin/java -Xshare:off -XX:+UnlockExperimentalVMOptions -XX:+PrintFlagsFinal -version 2>&1 | \
             grep "G1SparkEnhanceEscapeAnalysis\|G1SparkScalarReplacement" | head -2
 
           # Phase 6: Vectorization (5 flags)
           echo "Phase 6 - Vectorization:"
-          $BUILD_DIR/jdk/bin/java -XX:+UnlockExperimentalVMOptions -XX:+PrintFlagsFinal -version 2>&1 | \
+          $BUILD_DIR/jdk/bin/java -Xshare:off -XX:+UnlockExperimentalVMOptions -XX:+PrintFlagsFinal -version 2>&1 | \
             grep "G1SparkEnableVectorization\|G1SparkEnableAutoVectorization" | head -2
 
           echo "=== Flag Check Complete ==="
