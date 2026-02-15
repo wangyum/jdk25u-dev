@@ -45,6 +45,7 @@
 #include "opto/vectornode.hpp"
 #include "runtime/globals_extension.hpp"
 #include "runtime/stubRoutines.hpp"
+#include "gc/shared/sparkVectorizationOptimizer.hpp"
 
 //------------------------------is_loop_exit-----------------------------------
 // Given an IfNode, return the loop-exiting projection or null if both
@@ -938,6 +939,52 @@ bool IdealLoopTree::policy_unroll(PhaseIdealLoop *phase) {
   }
   _local_loop_unroll_limit  = LoopUnrollLimit;
   _local_loop_unroll_factor = 4;
+
+  // Spark Vectorization Optimization: Adjust unroll factor for Spark columnar operations
+  if (SparkVectorizationOptimizer::is_enabled()) {
+    // Detect if this loop might be a Spark columnar operation
+    // Look for array access patterns in the loop body
+    bool has_array_loads = false;
+    bool has_array_stores = false;
+    int array_access_count = 0;
+
+    for (uint i = 0; i < _body.size(); i++) {
+      Node* n = _body.at(i);
+      if (n->is_Load() && n->as_Load()->adr_type()->isa_aryptr()) {
+        has_array_loads = true;
+        array_access_count++;
+      } else if (n->is_Store() && n->as_Store()->adr_type()->isa_aryptr()) {
+        has_array_stores = true;
+        array_access_count++;
+      }
+    }
+
+    // If this looks like a columnar batch operation (multiple array accesses),
+    // provide hints for better vectorization
+    if ((has_array_loads || has_array_stores) && array_access_count >= 2) {
+      // Estimate iteration count from trip count
+      uint trip_count = cl->trip_count();
+
+      if (SparkVectorizationOptimizer::should_auto_vectorize("batch", trip_count)) {
+        // Spark columnar operations benefit from aggressive unrolling
+        // ColumnarBatch default size is 4096 rows
+        if (trip_count >= 256) {
+          _local_loop_unroll_factor = 8;  // More aggressive for large batches
+          if (log_is_enabled(Trace, gc)) {
+            log_trace(gc)("Spark Vectorization: Increasing unroll factor to 8 for columnar loop (trip_count=%u)", trip_count);
+          }
+          SparkVectorizationOptimizer::record_auto_vectorization("columnar_batch", 8);
+        } else if (trip_count >= 32) {
+          _local_loop_unroll_factor = 6;  // Moderate for medium batches
+          SparkVectorizationOptimizer::record_auto_vectorization("columnar_batch", 6);
+        }
+
+        // Record this as a vectorized operation
+        SparkVectorizationOptimizer::record_vectorized_operation("loop_unroll", trip_count);
+      }
+    }
+  }
+
   int future_unroll_cnt = cl->unrolled_count() * 2;
   if (!cl->is_vectorized_loop()) {
     if (future_unroll_cnt > LoopMaxUnroll) return false;

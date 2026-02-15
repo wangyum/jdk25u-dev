@@ -74,6 +74,11 @@ public:
                                const char* operation,
                                const char* reason);
 
+  // Common Spark class patterns (public for JIT compiler access)
+  static bool is_unsafe_row_class(const char* class_name);
+  static bool is_scala_tuple_class(const char* class_name);
+  static bool is_spark_internal_class(const char* class_name);
+
 private:
   // Statistics
   static size_t _total_hash_computations;
@@ -82,11 +87,6 @@ private:
   static size_t _join_hash_count;
   static size_t _cache_hits;
   static size_t _cache_misses;
-
-  // Common Spark class patterns
-  static bool is_unsafe_row_class(const char* class_name);
-  static bool is_scala_tuple_class(const char* class_name);
-  static bool is_spark_internal_class(const char* class_name);
 };
 
 #endif // SHARE_GC_SHARED_SPARKHASHOPTIMIZER_HPP

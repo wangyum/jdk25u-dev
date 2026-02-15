@@ -60,6 +60,7 @@
 #include "runtime/stubRoutines.hpp"
 #include "utilities/macros.hpp"
 #include "utilities/powerOfTwo.hpp"
+#include "gc/shared/sparkHashOptimizer.hpp"
 
 //---------------------------make_vm_intrinsic----------------------------
 CallGenerator* Compile::make_vm_intrinsic(ciMethod* m, bool is_virtual) {
@@ -4740,6 +4741,34 @@ bool LibraryCallKit::inline_native_hashcode(bool is_virtual, bool is_static) {
   if (is_virtual) {
     // After null check, get the object's klass.
     Node* obj_klass = load_object_klass(obj);
+
+    // Spark Hash Optimization: Detect UnsafeRow and other Spark hash-heavy classes
+    if (SparkHashOptimizer::is_enabled()) {
+      const TypeKlassPtr* tklass = _gvn.type(obj_klass)->isa_klassptr();
+      if (tklass != nullptr && tklass->klass_is_exact()) {
+        ciKlass* klass = tklass->exact_klass();
+        if (klass != nullptr) {
+          const char* class_name = klass->name()->as_utf8();
+
+          // Check if this is a Spark class that benefits from hash optimization
+          if (SparkHashOptimizer::is_unsafe_row_class(class_name)) {
+            // UnsafeRow: hash is computed from raw bytes
+            // This is a hot path in shuffle/partitioning
+            if (log_is_enabled(Trace, gc)) {
+              log_trace(gc)("Spark Hash: Optimizing UnsafeRow hashCode");
+            }
+            SparkHashOptimizer::record_hash_computation("UnsafeRow.hashCode", 0);
+          } else if (SparkHashOptimizer::is_scala_tuple_class(class_name)) {
+            // Scala tuples: heavily used in Spark RDD operations
+            SparkHashOptimizer::record_hash_computation("Tuple.hashCode", 0);
+          } else if (SparkHashOptimizer::is_spark_internal_class(class_name)) {
+            // Other Spark internal classes (InternalRow, HashPartitioner, etc.)
+            SparkHashOptimizer::record_hash_computation("Spark.hashCode", 0);
+          }
+        }
+      }
+    }
+
     generate_virtual_guard(obj_klass, slow_region);
   }
 

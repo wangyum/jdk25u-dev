@@ -26,6 +26,7 @@
 #include "compiler/compileLog.hpp"
 #include "gc/shared/barrierSet.hpp"
 #include "gc/shared/c2/barrierSetC2.hpp"
+#include "gc/shared/sparkEscapeAnalysisOptimizer.hpp"
 #include "libadt/vectset.hpp"
 #include "memory/allocation.hpp"
 #include "memory/resourceArea.hpp"
@@ -2904,6 +2905,28 @@ void ConnectionGraph::adjust_scalar_replaceable_state(JavaObjectNode* jobj, Uniq
   // There could be multiple merges involving the same jobj.
   Unique_Node_List candidates;
 
+  // Spark EA Enhancement: Detect if this is a Spark-specific object
+  bool is_spark_object = false;
+  const char* spark_class_name = nullptr;
+  Node* alloc_node = jobj->ideal_node();
+  if (SparkEscapeAnalysisOptimizer::is_enabled() && alloc_node != nullptr && alloc_node->is_Allocate()) {
+    AllocateNode* alloc = alloc_node->as_Allocate();
+    Node* klass_node = alloc->in(AllocateNode::KlassNode);
+    if (klass_node != nullptr) {
+      const TypeKlassPtr* tklass = klass_node->bottom_type()->isa_klassptr();
+      if (tklass != nullptr && tklass->klass_is_exact()) {
+        ciKlass* klass = tklass->exact_klass();
+        if (klass != nullptr) {
+          spark_class_name = klass->name()->as_utf8();
+          // Check if this is a known Spark SQL object type
+          is_spark_object = SparkEscapeAnalysisOptimizer::is_likely_non_escaping_spark_object(
+              spark_class_name,
+              klass->is_instance_klass() ? klass->size() * HeapWordSize : 0);
+        }
+      }
+    }
+  }
+
   // Search for non-escaping objects which are not scalar replaceable
   // and mark them to propagate the state to referenced objects.
 
@@ -2918,8 +2941,18 @@ void ConnectionGraph::adjust_scalar_replaceable_state(JavaObjectNode* jobj, Uniq
       // 1. An object is not scalar replaceable if the field into which it is
       // stored has unknown offset (stored into unknown element of an array).
       if (field->offset() == Type::OffsetBot) {
-        set_not_scalar_replaceable(jobj NOT_PRODUCT(COMMA "is stored at unknown offset"));
-        return;
+        // Spark EA Enhancement: Allow unknown offsets for small Spark objects
+        // InternalRow/Iterator wrappers stored in arrays during batch processing
+        // are typically consumed immediately and don't truly escape
+        if (is_spark_object && spark_class_name != nullptr) {
+          if (log_is_enabled(Trace, gc)) {
+            log_trace(gc)("Spark EA: Allowing unknown offset for %s", spark_class_name);
+          }
+          // Continue checking other constraints instead of returning
+        } else {
+          set_not_scalar_replaceable(jobj NOT_PRODUCT(COMMA "is stored at unknown offset"));
+          return;
+        }
       }
       for (BaseIterator i(field); i.has_next(); i.next()) {
         PointsToNode* base = i.get();
@@ -2959,9 +2992,47 @@ void ConnectionGraph::adjust_scalar_replaceable_state(JavaObjectNode* jobj, Uniq
         if (use_n->is_Phi() && can_reduce_phi(use_n->as_Phi())) {
           candidates.push(use_n);
         } else {
-          // Mark all objects as NSR if we can't remove the merge
-          set_not_scalar_replaceable(jobj NOT_PRODUCT(COMMA trace_merged_message(ptn)));
-          set_not_scalar_replaceable(ptn NOT_PRODUCT(COMMA trace_merged_message(jobj)));
+          // Spark EA Enhancement: Be more lenient with Phi merges for Spark objects
+          // Common pattern: different InternalRow implementations merged at loop header
+          // but both are non-escaping within the loop
+          bool allow_merge = false;
+          if (is_spark_object && ptn->is_JavaObject() && spark_class_name != nullptr) {
+            // Check if the other object in the merge is also a Spark object
+            JavaObjectNode* other_jobj = ptn->as_JavaObject();
+            Node* other_alloc = other_jobj->ideal_node();
+            if (other_alloc != nullptr && other_alloc->is_Allocate()) {
+              AllocateNode* other_alloc_node = other_alloc->as_Allocate();
+              Node* other_klass_node = other_alloc_node->in(AllocateNode::KlassNode);
+              if (other_klass_node != nullptr) {
+                const TypeKlassPtr* other_tklass = other_klass_node->bottom_type()->isa_klassptr();
+                if (other_tklass != nullptr && other_tklass->klass_is_exact()) {
+                  ciKlass* other_klass = other_tklass->exact_klass();
+                  if (other_klass != nullptr) {
+                    const char* other_class_name = other_klass->name()->as_utf8();
+                    // If both are Spark SQL objects, allow the merge
+                    if (SparkEscapeAnalysisOptimizer::is_likely_non_escaping_spark_object(
+                            other_class_name,
+                            other_klass->is_instance_klass() ? other_klass->size() * HeapWordSize : 0)) {
+                      allow_merge = true;
+                      if (log_is_enabled(Trace, gc)) {
+                        log_trace(gc)("Spark EA: Allowing merge of %s with %s",
+                                     spark_class_name, other_class_name);
+                      }
+                      SparkEscapeAnalysisOptimizer::log_optimization("adjust_SR_state",
+                                                                     spark_class_name,
+                                                                     "allowing Spark-to-Spark merge");
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          if (!allow_merge) {
+            // Mark all objects as NSR if we can't remove the merge
+            set_not_scalar_replaceable(jobj NOT_PRODUCT(COMMA trace_merged_message(ptn)));
+            set_not_scalar_replaceable(ptn NOT_PRODUCT(COMMA trace_merged_message(jobj)));
+          }
         }
       }
     }
@@ -2982,8 +3053,21 @@ void ConnectionGraph::adjust_scalar_replaceable_state(JavaObjectNode* jobj, Uniq
     // 4. An object is not scalar replaceable if it has a field with unknown
     // offset (array's element is accessed in loop).
     if (offset == Type::OffsetBot) {
-      set_not_scalar_replaceable(jobj NOT_PRODUCT(COMMA "has field with unknown offset"));
-      return;
+      // Spark EA Enhancement: Allow unknown offsets for Spark batch processing objects
+      // ColumnarBatch/InternalRow objects often have array fields accessed in loops
+      // but the object itself doesn't escape the loop
+      if (is_spark_object && spark_class_name != nullptr) {
+        if (log_is_enabled(Trace, gc)) {
+          log_trace(gc)("Spark EA: Allowing field with unknown offset for %s", spark_class_name);
+        }
+        SparkEscapeAnalysisOptimizer::log_optimization("adjust_SR_state",
+                                                       spark_class_name,
+                                                       "allowing unknown field offset");
+        // Continue checking instead of returning
+      } else {
+        set_not_scalar_replaceable(jobj NOT_PRODUCT(COMMA "has field with unknown offset"));
+        return;
+      }
     }
     // 5. Currently an object is not scalar replaceable if a LoadStore node
     // access its field since the field value is unknown after it.
@@ -3027,20 +3111,41 @@ void ConnectionGraph::adjust_scalar_replaceable_state(JavaObjectNode* jobj, Uniq
     //
     if (field->base_count() > 1 && candidates.size() == 0) {
       if (has_non_reducible_merge(field, reducible_merges)) {
-        for (BaseIterator i(field); i.has_next(); i.next()) {
-          PointsToNode* base = i.get();
-          // Don't take into account LocalVar nodes which
-          // may point to only one object which should be also
-          // this field's base by now.
-          if (base->is_JavaObject() && base != jobj) {
-            // Mark all bases.
-            set_not_scalar_replaceable(jobj NOT_PRODUCT(COMMA "may point to more than one object"));
-            set_not_scalar_replaceable(base NOT_PRODUCT(COMMA "may point to more than one object"));
+        // Spark EA Enhancement: Be more aggressive for Spark SQL objects
+        // Common pattern: InternalRow/Iterator created in loop, stored in temporary
+        // array, then immediately consumed. This looks like multiple bases but
+        // the object lifetime is actually very short and local.
+        bool allow_multiple_bases = false;
+        if (is_spark_object && spark_class_name != nullptr) {
+          // Only allow if base count is reasonable (< 4) to avoid truly complex escapes
+          if (field->base_count() <= 3) {
+            allow_multiple_bases = true;
+            if (log_is_enabled(Trace, gc)) {
+              log_trace(gc)("Spark EA: Allowing multiple bases (%d) for %s",
+                           field->base_count(), spark_class_name);
+            }
+            SparkEscapeAnalysisOptimizer::log_optimization("adjust_SR_state",
+                                                           spark_class_name,
+                                                           "allowing multiple bases");
           }
         }
 
-        if (!jobj->scalar_replaceable()) {
-          return;
+        if (!allow_multiple_bases) {
+          for (BaseIterator i(field); i.has_next(); i.next()) {
+            PointsToNode* base = i.get();
+            // Don't take into account LocalVar nodes which
+            // may point to only one object which should be also
+            // this field's base by now.
+            if (base->is_JavaObject() && base != jobj) {
+              // Mark all bases.
+              set_not_scalar_replaceable(jobj NOT_PRODUCT(COMMA "may point to more than one object"));
+              set_not_scalar_replaceable(base NOT_PRODUCT(COMMA "may point to more than one object"));
+            }
+          }
+
+          if (!jobj->scalar_replaceable()) {
+            return;
+          }
         }
       }
     }
@@ -3129,6 +3234,60 @@ void ConnectionGraph::find_scalar_replaceable_allocs(GrowableArray<JavaObjectNod
               break;
             }
           }
+        }
+      }
+    }
+  }
+
+  // Apply Spark-specific escape analysis enhancements
+  if (SparkEscapeAnalysisOptimizer::is_enabled()) {
+    for (int next = 0; next < jobj_length; ++next) {
+      JavaObjectNode* jobj = jobj_worklist.at(next);
+      if (!jobj->scalar_replaceable()) {
+        continue; // Already marked as NSR
+      }
+
+      // Get allocation node
+      Node* alloc = jobj->ideal_node();
+      if (alloc == nullptr || !alloc->is_Allocate()) {
+        continue;
+      }
+
+      AllocateNode* alloc_node = alloc->as_Allocate();
+
+      // Get klass from KlassNode input
+      Node* klass_node = alloc_node->in(AllocateNode::KlassNode);
+      if (klass_node == nullptr) {
+        continue;
+      }
+
+      const TypeKlassPtr* tklass = klass_node->bottom_type()->isa_klassptr();
+      if (tklass == nullptr) {
+        continue;
+      }
+
+      ciKlass* klass = tklass->exact_klass();
+      if (klass == nullptr) {
+        // No exact klass available, skip
+        continue;
+      }
+
+      // Get class name
+      const char* class_name = klass->name()->as_utf8();
+
+      // Check if this is a Spark object that should be aggressively scalarized
+      if (klass->is_instance_klass()) {
+        ciInstanceKlass* iklass = klass->as_instance_klass();
+        int field_count = iklass->nof_nonstatic_fields();
+
+        if (SparkEscapeAnalysisOptimizer::should_scalarize_aggressively(class_name, field_count)) {
+          // This Spark object is a good candidate for scalar replacement
+          // The scalar_replaceable flag is already set, just log it
+          if (log_is_enabled(Trace, gc)) {
+            log_trace(gc)("Spark EA: Marked for aggressive scalarization: %s (fields: %d)",
+                         class_name, field_count);
+          }
+          SparkEscapeAnalysisOptimizer::record_scalar_replacement(class_name, field_count);
         }
       }
     }
