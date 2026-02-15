@@ -24,6 +24,7 @@
 
 #include "compiler/compilerDefinitions.inline.hpp"
 #include "gc/shared/collectedHeap.hpp"
+#include "gc/shared/sparkTLABOptimizer.hpp"
 #include "gc/shared/threadLocalAllocBuffer.inline.hpp"
 #include "gc/shared/tlab_globals.hpp"
 #include "logging/log.hpp"
@@ -59,7 +60,13 @@ ThreadLocalAllocBuffer::ThreadLocalAllocBuffer() :
   // do nothing. TLABs must be inited by initialize() calls
 }
 
-size_t ThreadLocalAllocBuffer::initial_refill_waste_limit()     { return desired_size() / TLABRefillWasteFraction; }
+size_t ThreadLocalAllocBuffer::initial_refill_waste_limit()     {
+  // Use Spark-optimized refill waste limit if enabled
+  if (SparkAdaptiveTLAB && SparkTLABReduceRefillWaste) {
+    return SparkTLABOptimizer::get_refill_waste_limit(desired_size());
+  }
+  return desired_size() / TLABRefillWasteFraction;
+}
 size_t ThreadLocalAllocBuffer::min_size()                       { return align_object_size(MinTLABSize / HeapWordSize) + alignment_reserve(); }
 size_t ThreadLocalAllocBuffer::refill_waste_limit_increment()   { return TLABWasteIncrement; }
 
@@ -154,6 +161,29 @@ void ThreadLocalAllocBuffer::resize() {
   new_size = clamp(new_size, min_size(), max_size());
 
   size_t aligned_new_size = align_object_size(new_size);
+
+  // Apply Spark TLAB optimizations if enabled
+  if (SparkAdaptiveTLAB) {
+    size_t tlab_cap = Universe::heap()->tlab_capacity(thread()) / HeapWordSize;
+    size_t spark_optimized_size = SparkTLABOptimizer::calculate_tlab_size(
+        thread(),
+        aligned_new_size,
+        _allocation_fraction.average(),
+        tlab_cap);
+
+    if (spark_optimized_size != aligned_new_size) {
+      // Clamp again after Spark optimization
+      spark_optimized_size = clamp(spark_optimized_size, min_size(), max_size());
+      spark_optimized_size = align_object_size(spark_optimized_size);
+
+      SparkTLABOptimizer::log_optimization(thread(),
+                                           aligned_new_size,
+                                           spark_optimized_size,
+                                           "adaptive sizing");
+
+      aligned_new_size = spark_optimized_size;
+    }
+  }
 
   log_trace(gc, tlab)("TLAB new size: thread: " PTR_FORMAT " [id: %2d]"
                       " refills %d  alloc: %8.6f desired_size: %zu -> %zu",

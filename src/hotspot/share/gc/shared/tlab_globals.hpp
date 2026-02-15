@@ -84,6 +84,39 @@
           range(0, max_jint)                                                \
           constraint(TLABWasteIncrementConstraintFunc,AfterMemoryInit)      \
                                                                             \
+  /* Apache Spark TLAB Optimizations */                                    \
+  product(bool, SparkAdaptiveTLAB, false, EXPERIMENTAL,                     \
+          "Enable adaptive TLAB sizing for Spark workloads. "               \
+          "Automatically detects high allocation rate patterns and "        \
+          "dynamically adjusts TLAB size for better performance.")          \
+                                                                            \
+  product(uintx, SparkTLABHighAllocThreshold, 80, EXPERIMENTAL,             \
+          "Allocation rate percentage threshold to trigger larger TLABs "   \
+          "for Spark workloads (percentage of capacity).")                  \
+          range(50, 100)                                                    \
+                                                                            \
+  product(uintx, SparkTLABSizeBoostPercent, 200, EXPERIMENTAL,              \
+          "Percentage increase for TLAB size when high allocation "         \
+          "detected (200 = 2x larger TLABs).")                              \
+          range(100, 500)                                                   \
+                                                                            \
+  product(bool, SparkTLABThreadDetection, true, EXPERIMENTAL,               \
+          "Detect Spark executor threads by name and give them "            \
+          "larger TLABs automatically.")                                    \
+                                                                            \
+  product(uintx, SparkExecutorTLABMultiplier, 4, EXPERIMENTAL,              \
+          "TLAB size multiplier for detected Spark executor threads.")      \
+          range(1, 10)                                                      \
+                                                                            \
+  product(bool, SparkTLABReduceRefillWaste, true, EXPERIMENTAL,             \
+          "Reduce TLAB refill waste for bursty Spark allocation patterns "  \
+          "by keeping TLABs longer before retirement.")                     \
+                                                                            \
+  product(uintx, SparkTLABRefillWasteFraction, 32, EXPERIMENTAL,            \
+          "Refill waste fraction for Spark (lower = keep TLABs longer). "   \
+          "Default is 64, Spark uses 32 for less waste.")                   \
+          range(16, 128)                                                    \
+                                                                            \
 
 // end of TLAB_FLAGS
 
