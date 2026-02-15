@@ -22,7 +22,6 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "gc/shared/sparkEscapeAnalysisOptimizer.hpp"
 #include "logging/log.hpp"
 #include "runtime/globals.hpp"

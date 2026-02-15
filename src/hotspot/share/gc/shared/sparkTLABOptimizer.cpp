@@ -22,7 +22,6 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "gc/shared/sparkTLABOptimizer.hpp"
 #include "logging/log.hpp"
 #include "runtime/javaThread.hpp"

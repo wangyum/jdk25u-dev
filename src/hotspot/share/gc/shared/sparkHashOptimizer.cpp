@@ -22,7 +22,6 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "gc/shared/sparkHashOptimizer.hpp"
 #include "logging/log.hpp"
 #include "runtime/globals.hpp"
