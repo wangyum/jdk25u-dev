@@ -425,6 +425,28 @@
           "heap to avoid GC overhead.")                                     \
           range(64, 8192)                                                   \
                                                                             \
+  product(bool, G1SparkEnableVectorization, true, EXPERIMENTAL,             \
+          "Enable vectorization optimizations for Spark SQL workloads. "    \
+          "Optimizes columnar batch processing and array operations.")      \
+                                                                            \
+  product(bool, G1SparkEnableAutoVectorization, true, EXPERIMENTAL,         \
+          "Enable automatic loop vectorization for Spark operations. "      \
+          "Provides hints to C2 JIT compiler for SIMD optimization.")       \
+                                                                            \
+  product(bool, G1SparkEliminateBoundsChecks, true, EXPERIMENTAL,           \
+          "Eliminate redundant bounds checks in vectorized operations. "    \
+          "Safe for Spark's controlled array access patterns.")             \
+                                                                            \
+  product(size_t, G1SparkPrefetchDistance, 4, EXPERIMENTAL,                 \
+          "Cache line prefetch distance for vectorized operations. "        \
+          "Improves memory bandwidth utilization in batch processing.")     \
+          range(0, 64)                                                      \
+                                                                            \
+  product(size_t, G1SparkVectorizationThreshold, 32, EXPERIMENTAL,          \
+          "Minimum elements to enable vectorization. "                      \
+          "Smaller batches use scalar code to avoid overhead.")             \
+          range(1, 16384)                                                   \
+                                                                            \
   GC_G1_EVACUATION_FAILURE_FLAGS(develop,                                   \
                     develop_pd,                                             \
                     product,                                                \
