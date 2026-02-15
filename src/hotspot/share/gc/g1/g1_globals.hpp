@@ -396,6 +396,19 @@
           "high per-thread allocation rates during task processing.")       \
           range(1, 10)                                                      \
                                                                             \
+  product(bool, G1SparkOptimizeHashOperations, true, EXPERIMENTAL,          \
+          "Enable hash operation optimizations for Spark workloads. "       \
+          "Spark SQL relies heavily on hash operations (partitioning, "     \
+          "aggregation, joins, UnsafeRow hashing).")                        \
+                                                                            \
+  product(bool, G1SparkEnableHashCaching, false, EXPERIMENTAL,              \
+          "Enable hash code caching for immutable Spark objects. "          \
+          "Experimental feature for future intrinsic optimizations.")       \
+                                                                            \
+  product(bool, G1SparkOptimizeUnsafeRowHash, true, EXPERIMENTAL,           \
+          "Optimize UnsafeRow hash code computation. "                      \
+          "UnsafeRow.hashCode() is called millions of times in Spark SQL.") \
+                                                                            \
   GC_G1_EVACUATION_FAILURE_FLAGS(develop,                                   \
                     develop_pd,                                             \
                     product,                                                \
