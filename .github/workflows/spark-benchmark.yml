@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - FileStatus
+      - spark
     paths:
       - 'src/**'
       - '.github/workflows/spark-benchmark.yml'

@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - FileStatus
+      - spark
   pull_request:
     branches:
       - main
