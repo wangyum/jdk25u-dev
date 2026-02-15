@@ -409,6 +409,22 @@
           "Optimize UnsafeRow hash code computation. "                      \
           "UnsafeRow.hashCode() is called millions of times in Spark SQL.") \
                                                                             \
+  product(bool, G1SparkEnhanceEscapeAnalysis, true, EXPERIMENTAL,           \
+          "Enhance escape analysis for Spark SQL workloads. "               \
+          "Enables stack allocation and scalar replacement for "            \
+          "non-escaping Spark objects (InternalRow, Iterators, etc.).")     \
+                                                                            \
+  product(size_t, G1SparkScalarReplacementThreshold, 20, EXPERIMENTAL,      \
+          "Maximum number of fields for aggressive scalar replacement. "    \
+          "Objects with fewer fields are candidates for scalarization.")    \
+          range(1, 100)                                                     \
+                                                                            \
+  product(size_t, G1SparkStackAllocationLimit, 512, EXPERIMENTAL,           \
+          "Maximum object size (bytes) for stack allocation. "              \
+          "Smaller non-escaping objects allocated on stack instead of "     \
+          "heap to avoid GC overhead.")                                     \
+          range(64, 8192)                                                   \
+                                                                            \
   GC_G1_EVACUATION_FAILURE_FLAGS(develop,                                   \
                     develop_pd,                                             \
                     product,                                                \
