@@ -105,7 +105,7 @@ void G1Policy::init(G1CollectedHeap* g1h, G1CollectionSet* collection_set) {
                        InitiatingHeapOccupancyPercent);
     log_info(gc, init)("  Reserve: %u%% (default: %u%%)",
                        G1SparkReservePercent, G1ReservePercent);
-    log_info(gc, init)("  TLAB Multiplier: %ux", G1SparkTLABSizeMultiplier);
+    log_info(gc, init)("  TLAB Multiplier: " UINTX_FORMAT "x", G1SparkTLABSizeMultiplier);
 
     if (G1SparkAggressiveStringDedup) {
       log_info(gc, init)("  Aggressive String Deduplication: enabled (age threshold: %u)",
