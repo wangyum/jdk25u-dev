@@ -303,9 +303,13 @@ public:
 
   static address _string_indexof_array[4];
 
+  // Spark MurmurHash3 optimization
+  static address _sparkMurmur3Hash;
+
   /* special case: stub employs array of entries */
 
   static bool is_stub_code(address addr)                   { return contains(addr); }
+  static address sparkMurmur3Hash()                        { return _sparkMurmur3Hash; }
 
   // generate code to implement method contains
 

@@ -7524,6 +7524,176 @@ class StubGenerator: public StubCodeGenerator {
     return start;
   }
 
+  /**
+   * MurmurHash3_x86_32 for Apache Spark UnsafeRow
+   *
+   * Arguments:
+   *
+   * Inputs:
+   *   c_rarg0   - byte* data      (data pointer)
+   *   c_rarg1   - int   length    (data length in bytes)
+   *   c_rarg2   - int   seed      (hash seed)
+   *
+   * Output:
+   *   r0        - int hash result (32-bit hash value)
+   *
+   * Algorithm: MurmurHash3_x86_32
+   *   Constants: c1 = 0xcc9e2d51, c2 = 0x1b873593
+   *   For each 4-byte block:
+   *     k *= c1; k = rotl(k, 15); k *= c2;
+   *     h ^= k; h = rotl(h, 13); h = h * 5 + 0xe6546b64;
+   *   Finalization with avalanche mixer
+   */
+  address generate_sparkMurmur3Hash() {
+    __ align(CodeEntryAlignment);
+    StubCodeMark mark(this, "StubRoutines", "sparkMurmur3Hash");
+    address start = __ pc();
+
+    // Input registers
+    const Register data   = c_rarg0;  // byte* data
+    const Register len    = c_rarg1;  // int length
+    const Register seed   = c_rarg2;  // int seed
+
+    // Working registers
+    const Register hash   = r10;      // Current hash value
+    const Register k1     = r11;      // Block value
+    const Register nblocks = r12;     // Number of 4-byte blocks
+    const Register tail   = r13;      // Pointer to tail bytes
+    const Register tmp    = r14;      // Temporary
+
+    // Constants
+    const uint32_t c1 = 0xcc9e2d51;
+    const uint32_t c2 = 0x1b873593;
+    const uint32_t fmix_c1 = 0x85ebca6b;
+    const uint32_t fmix_c2 = 0xc2b2ae35;
+
+    Label process_blocks, process_tail, tail_1, tail_2, tail_3, finalize, done;
+
+    BLOCK_COMMENT("Entry:");
+    __ enter();
+
+    // Initialize hash with seed
+    __ movw(hash, seed);
+
+    // Calculate number of complete 4-byte blocks
+    __ asrw(nblocks, len, 2);          // nblocks = len / 4
+
+    // Calculate tail pointer: tail = data + (nblocks * 4)
+    __ add(tail, data, nblocks, ext::uxtw, 2);
+
+    // Process 4-byte blocks
+    __ cbzw(nblocks, process_tail);    // if (nblocks == 0) goto process_tail
+
+    BLOCK_COMMENT("Process 4-byte blocks:");
+    __ bind(process_blocks);
+
+    // Load 4-byte block (little-endian)
+    __ ldrw(k1, Address(__ post(data, 4)));
+
+    // k1 *= c1
+    __ movw(tmp, c1);
+    __ mulw(k1, k1, tmp);
+
+    // k1 = rotl(k1, 15)
+    __ rorw(k1, k1, 32 - 15);
+
+    // k1 *= c2
+    __ movw(tmp, c2);
+    __ mulw(k1, k1, tmp);
+
+    // hash ^= k1
+    __ eorw(hash, hash, k1);
+
+    // hash = rotl(hash, 13)
+    __ rorw(hash, hash, 32 - 13);
+
+    // hash = hash * 5 + 0xe6546b64
+    __ movw(tmp, 5);
+    __ mulw(hash, hash, tmp);
+    __ movw(tmp, 0xe6546b64);
+    __ addw(hash, hash, tmp);
+
+    // Loop: nblocks--; if (nblocks > 0) continue
+    __ subsw(nblocks, nblocks, 1);
+    __ br(Assembler::GT, process_blocks);
+
+    // Process tail bytes (0-3 bytes)
+    BLOCK_COMMENT("Process tail bytes:");
+    __ bind(process_tail);
+
+    __ movw(k1, 0);                    // k1 = 0
+    __ andw(tmp, len, 3);              // tmp = len & 3 (tail length)
+    __ cbzw(tmp, finalize);            // if (tail_len == 0) goto finalize
+
+    // Check tail length
+    __ cmpw(tmp, 3);
+    __ br(Assembler::EQ, tail_3);
+    __ cmpw(tmp, 2);
+    __ br(Assembler::EQ, tail_2);
+    // Fall through to tail_1
+
+    BLOCK_COMMENT("Tail 1 byte:");
+    __ bind(tail_1);
+    __ ldrb(k1, Address(tail, 0));
+    __ b(finalize);
+
+    BLOCK_COMMENT("Tail 2 bytes:");
+    __ bind(tail_2);
+    __ ldrh(k1, Address(tail, 0));
+    __ b(finalize);
+
+    BLOCK_COMMENT("Tail 3 bytes:");
+    __ bind(tail_3);
+    __ ldrh(k1, Address(tail, 0));
+    __ ldrb(tmp, Address(tail, 2));
+    __ lslw(tmp, tmp, 16);                 // tmp = tmp << 16
+    __ orrw(k1, k1, tmp);                  // k1 = k1 | tmp
+    // Fall through to finalize
+
+    // Process tail: k1 *= c1; k1 = rotl(k1, 15); k1 *= c2; hash ^= k1
+    __ bind(finalize);
+    __ cbzw(k1, done);                 // Skip if k1 == 0
+
+    __ movw(tmp, c1);
+    __ mulw(k1, k1, tmp);
+    __ rorw(k1, k1, 32 - 15);
+    __ movw(tmp, c2);
+    __ mulw(k1, k1, tmp);
+    __ eorw(hash, hash, k1);
+
+    // Finalization: avalanche mixer
+    BLOCK_COMMENT("Avalanche mixer:");
+    __ bind(done);
+
+    // hash ^= len
+    __ eorw(hash, hash, len);
+
+    // hash ^= (hash >> 16)
+    __ eorw(hash, hash, hash, Assembler::LSR, 16);
+
+    // hash *= fmix_c1
+    __ movw(tmp, fmix_c1);
+    __ mulw(hash, hash, tmp);
+
+    // hash ^= (hash >> 13)
+    __ eorw(hash, hash, hash, Assembler::LSR, 13);
+
+    // hash *= fmix_c2
+    __ movw(tmp, fmix_c2);
+    __ mulw(hash, hash, tmp);
+
+    // hash ^= (hash >> 16)
+    __ eorw(hash, hash, hash, Assembler::LSR, 16);
+
+    // Return result in r0
+    __ movw(r0, hash);
+
+    __ leave();
+    __ ret(lr);
+
+    return start;
+  }
+
   /***
    *  Arguments:
    *
@@ -11683,6 +11853,11 @@ class StubGenerator: public StubCodeGenerator {
 
     if (UseCRC32CIntrinsics) {
       StubRoutines::_updateBytesCRC32C = generate_updateBytesCRC32C();
+    }
+
+    // Spark MurmurHash3 optimization
+    if (G1OptimizeForSpark && G1SparkOptimizeHashOperations) {
+      StubRoutines::_sparkMurmur3Hash = generate_sparkMurmur3Hash();
     }
 
     if (vmIntrinsics::is_intrinsic_available(vmIntrinsics::_dsin)) {

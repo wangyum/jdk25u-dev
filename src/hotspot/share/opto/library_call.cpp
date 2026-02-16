@@ -4754,8 +4754,25 @@ bool LibraryCallKit::inline_native_hashcode(bool is_virtual, bool is_static) {
           if (SparkHashOptimizer::is_unsafe_row_class(class_name)) {
             // UnsafeRow: hash is computed from raw bytes
             // This is a hot path in shuffle/partitioning
+
+            // TODO: Full intrinsic integration requires:
+            // 1. Load UnsafeRow fields: baseObject, baseOffset, sizeInBytes
+            // 2. Call StubRoutines::sparkMurmur3Hash() with these parameters
+            // 3. Return the hash value directly (bypass standard hashCode path)
+            //
+            // For now, we track the pattern and use the standard hashCode.
+            // The assembly stub is ready for integration when UnsafeRow
+            // structure is exposed or when we add a specialized API.
+
+            if (StubRoutines::sparkMurmur3Hash() != nullptr) {
+              if (log_is_enabled(Debug, gc)) {
+                log_debug(gc)("Spark Hash: MurmurHash3 stub available for UnsafeRow");
+              }
+              // Future: Generate call to sparkMurmur3Hash stub here
+            }
+
             if (log_is_enabled(Trace, gc)) {
-              log_trace(gc)("Spark Hash: Optimizing UnsafeRow hashCode");
+              log_trace(gc)("Spark Hash: Tracking UnsafeRow hashCode");
             }
             SparkHashOptimizer::record_hash_computation("UnsafeRow.hashCode", 0);
           } else if (SparkHashOptimizer::is_scala_tuple_class(class_name)) {

@@ -3059,6 +3059,205 @@ address StubGenerator::generate_updateBytesCRC32() {
 }
 
 /**
+ * MurmurHash3_x86_32 for Apache Spark UnsafeRow
+ *
+ * Arguments:
+ *
+ * Inputs (Unix):
+ *   rdi (c_rarg0) - byte* data      (data pointer)
+ *   rsi (c_rarg1) - int   length    (data length in bytes)
+ *   rdx (c_rarg2) - int   seed      (hash seed)
+ *
+ * Inputs (Windows):
+ *   rcx (c_rarg0) - byte* data      (data pointer)
+ *   rdx (c_rarg1) - int   length    (data length in bytes)
+ *   r8  (c_rarg2) - int   seed      (hash seed)
+ *
+ * Output:
+ *   rax           - int hash result (32-bit hash value)
+ *
+ * Algorithm: MurmurHash3_x86_32
+ *   Constants: c1 = 0xcc9e2d51, c2 = 0x1b873593
+ *   For each 4-byte block:
+ *     k *= c1; k = rotl(k, 15); k *= c2;
+ *     h ^= k; h = rotl(h, 13); h = h * 5 + 0xe6546b64;
+ *   Finalization with avalanche mixer
+ */
+address StubGenerator::generate_sparkMurmur3Hash() {
+  __ align(CodeEntryAlignment);
+  StubCodeMark mark(this, "StubRoutines", "sparkMurmur3Hash");
+  address start = __ pc();
+
+  // Input registers
+  const Register data   = c_rarg0;  // byte* data
+  const Register len    = c_rarg1;  // int length
+  const Register seed   = c_rarg2;  // int seed
+
+  // Working registers
+  const Register hash   = rdi;      // Current hash value (reuse after saving)
+  const Register k1     = rsi;      // Block value (reuse after saving)
+  const Register nblocks = r8;      // Number of 4-byte blocks
+  const Register tail   = r9;       // Pointer to tail bytes
+  const Register tmp    = r10;      // Temporary
+
+  // Constants
+  const uint32_t c1 = 0xcc9e2d51;
+  const uint32_t c2 = 0x1b873593;
+  const uint32_t fmix_c1 = 0x85ebca6b;
+  const uint32_t fmix_c2 = 0xc2b2ae35;
+
+  Label process_blocks, process_tail, tail_1, tail_2, tail_3, finalize, done;
+
+  BLOCK_COMMENT("Entry:");
+  __ enter();
+
+  // Save registers (Unix ABI: rdi, rsi are arguments, but we'll reuse them)
+  __ push(rdi);
+  __ push(rsi);
+
+  // Initialize hash with seed
+  __ movl(hash, seed);
+
+  // Calculate number of complete 4-byte blocks
+  __ movl(nblocks, len);
+  __ shrl(nblocks, 2);               // nblocks = len >> 2
+
+  // Calculate tail pointer: tail = data + (nblocks * 4)
+  __ movl(tmp, nblocks);
+  __ shll(tmp, 2);                   // tmp = nblocks * 4
+  __ lea(tail, Address(data, tmp, Address::times_1));
+
+  // Process 4-byte blocks
+  __ testl(nblocks, nblocks);
+  __ jcc(Assembler::zero, process_tail);
+
+  BLOCK_COMMENT("Process 4-byte blocks:");
+  __ bind(process_blocks);
+
+  // Load 4-byte block (little-endian)
+  __ movl(k1, Address(data, 0));
+  __ addq(data, 4);
+
+  // k1 *= c1
+  __ imull(k1, k1, c1);
+
+  // k1 = rotl(k1, 15) = (k1 << 15) | (k1 >>> 17)
+  __ movl(tmp, k1);
+  __ shll(k1, 15);
+  __ shrl(tmp, 17);
+  __ orl(k1, tmp);
+
+  // k1 *= c2
+  __ imull(k1, k1, c2);
+
+  // hash ^= k1
+  __ xorl(hash, k1);
+
+  // hash = rotl(hash, 13) = (hash << 13) | (hash >>> 19)
+  __ movl(tmp, hash);
+  __ shll(hash, 13);
+  __ shrl(tmp, 19);
+  __ orl(hash, tmp);
+
+  // hash = hash * 5 + 0xe6546b64
+  __ imull(hash, hash, 5);
+  __ addl(hash, 0xe6546b64);
+
+  // Loop: nblocks--; if (nblocks > 0) continue
+  __ decl(nblocks);
+  __ jcc(Assembler::notZero, process_blocks);
+
+  // Process tail bytes (0-3 bytes)
+  BLOCK_COMMENT("Process tail bytes:");
+  __ bind(process_tail);
+
+  __ xorl(k1, k1);                   // k1 = 0
+  __ movl(tmp, len);
+  __ andl(tmp, 3);                   // tmp = len & 3 (tail length)
+  __ testl(tmp, tmp);
+  __ jcc(Assembler::zero, finalize);
+
+  // Check tail length
+  __ cmpl(tmp, 3);
+  __ jcc(Assembler::equal, tail_3);
+  __ cmpl(tmp, 2);
+  __ jcc(Assembler::equal, tail_2);
+  // Fall through to tail_1
+
+  BLOCK_COMMENT("Tail 1 byte:");
+  __ bind(tail_1);
+  __ movzbl(k1, Address(tail, 0));
+  __ jmp(finalize);
+
+  BLOCK_COMMENT("Tail 2 bytes:");
+  __ bind(tail_2);
+  __ movzwl(k1, Address(tail, 0));
+  __ jmp(finalize);
+
+  BLOCK_COMMENT("Tail 3 bytes:");
+  __ bind(tail_3);
+  __ movzwl(k1, Address(tail, 0));
+  __ movzbl(tmp, Address(tail, 2));
+  __ shll(tmp, 16);
+  __ orl(k1, tmp);
+  // Fall through to finalize
+
+  // Process tail: k1 *= c1; k1 = rotl(k1, 15); k1 *= c2; hash ^= k1
+  __ bind(finalize);
+  __ testl(k1, k1);
+  __ jcc(Assembler::zero, done);
+
+  __ imull(k1, k1, c1);
+  __ movl(tmp, k1);
+  __ shll(k1, 15);
+  __ shrl(tmp, 17);
+  __ orl(k1, tmp);
+  __ imull(k1, k1, c2);
+  __ xorl(hash, k1);
+
+  // Finalization: avalanche mixer
+  BLOCK_COMMENT("Avalanche mixer:");
+  __ bind(done);
+
+  // hash ^= len
+  __ xorl(hash, len);
+
+  // hash ^= (hash >> 16)
+  __ movl(tmp, hash);
+  __ shrl(tmp, 16);
+  __ xorl(hash, tmp);
+
+  // hash *= fmix_c1
+  __ imull(hash, hash, fmix_c1);
+
+  // hash ^= (hash >> 13)
+  __ movl(tmp, hash);
+  __ shrl(tmp, 13);
+  __ xorl(hash, tmp);
+
+  // hash *= fmix_c2
+  __ imull(hash, hash, fmix_c2);
+
+  // hash ^= (hash >> 16)
+  __ movl(tmp, hash);
+  __ shrl(tmp, 16);
+  __ xorl(hash, tmp);
+
+  // Return result in rax
+  __ movl(rax, hash);
+
+  // Restore registers
+  __ pop(rsi);
+  __ pop(rdi);
+
+  __ vzeroupper();
+  __ leave();
+  __ ret(0);
+
+  return start;
+}
+
+/**
 *  Arguments:
 *
 * Inputs:
@@ -4103,6 +4302,11 @@ void StubGenerator::generate_initial_stubs() {
     StubRoutines::x86::generate_CRC32C_table(supports_clmul);
     StubRoutines::_crc32c_table_addr = (address)StubRoutines::x86::_crc32c_table;
     StubRoutines::_updateBytesCRC32C = generate_updateBytesCRC32C(supports_clmul);
+  }
+
+  // Spark MurmurHash3 optimization
+  if (G1OptimizeForSpark && G1SparkOptimizeHashOperations) {
+    StubRoutines::_sparkMurmur3Hash = generate_sparkMurmur3Hash();
   }
 
   if (VM_Version::supports_float16()) {

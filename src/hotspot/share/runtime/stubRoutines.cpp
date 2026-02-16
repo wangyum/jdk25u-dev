@@ -101,6 +101,7 @@ jint    StubRoutines::_verify_oop_count                         = 0;
 
 
 address StubRoutines::_string_indexof_array[4]   =    { nullptr };
+address StubRoutines::_sparkMurmur3Hash          =      nullptr;
 
 const char* StubRoutines::get_blob_name(StubGenBlobId id) {
   assert(0 <= id && id < StubGenBlobId::NUM_BLOBIDS, "invalid blob id");
