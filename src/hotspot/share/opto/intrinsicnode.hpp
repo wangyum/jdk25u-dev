@@ -181,6 +181,24 @@ class VectorizedHashCodeNode: public Node {
   virtual const Type* Value(PhaseGVN* phase) const;
 };
 
+//------------------------------SparkMurmur3HashNode--------------------------------
+// Optimized MurmurHash3 for Spark UnsafeRow
+// Computes hash over byte array using MurmurHash3_x86_32 algorithm
+// Used for shuffle partitioning and hash aggregation
+class SparkMurmur3HashNode: public Node {
+ public:
+  SparkMurmur3HashNode(Node* control, Node* memory, Node* data, Node* length, Node* seed)
+    : Node(control, memory, data, length, seed) {};
+  virtual int Opcode() const;
+  virtual bool depends_only_on_test() const { return false; }
+  virtual const Type* bottom_type() const { return TypeInt::INT; }
+  virtual const TypePtr* adr_type() const { return TypePtr::BOTTOM; }
+  virtual uint match_edge(uint idx) const;
+  virtual uint ideal_reg() const { return Op_RegI; }
+  virtual Node* Ideal(PhaseGVN* phase, bool can_reshape);
+  virtual const Type* Value(PhaseGVN* phase) const;
+};
+
 //------------------------------EncodeISOArray--------------------------------
 // encode char[] to byte[] in ISO_8859_1 or ASCII
 class EncodeISOArrayNode: public Node {

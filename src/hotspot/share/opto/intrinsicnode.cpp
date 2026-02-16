@@ -96,6 +96,22 @@ const Type* VectorizedHashCodeNode::Value(PhaseGVN* phase) const {
   return bottom_type();
 }
 
+//------------------------------SparkMurmur3HashNode---------------------------
+uint SparkMurmur3HashNode::match_edge(uint idx) const {
+  // Do not match memory edge.
+  // Inputs: control(0), memory(1), data(2), length(3), seed(4)
+  return idx >= 2 && idx <= 4;
+}
+
+Node* SparkMurmur3HashNode::Ideal(PhaseGVN* phase, bool can_reshape) {
+  return remove_dead_region(phase, can_reshape) ? this : nullptr;
+}
+
+const Type* SparkMurmur3HashNode::Value(PhaseGVN* phase) const {
+  if (in(0) && phase->type(in(0)) == Type::TOP) return Type::TOP;
+  return bottom_type();
+}
+
 
 //=============================================================================
 //------------------------------match_edge-------------------------------------
