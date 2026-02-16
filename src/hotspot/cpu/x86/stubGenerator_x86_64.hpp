@@ -434,6 +434,10 @@ class StubGenerator: public StubCodeGenerator {
   // Ghash single and multi block operations using AVX instructions
   address generate_avx_ghash_processBlocks();
 
+  // Spark SQL optimizations
+  // MurmurHash3_x86_32 assembly implementation for UnsafeRow hashing
+  address generate_sparkMurmur3Hash();
+
   // ChaCha20 stubs and helper functions
   void generate_chacha_stubs();
   address generate_chacha20Block_avx();
