@@ -209,9 +209,15 @@ jobs:
         if: success()
         run: |
           cd $BUILD_DIR
-          tar -czf jdk-spark-optimized.tar.gz jdk/
+
+          # Use -h flag to dereference symbolic links (follow symlinks and archive actual files)
+          tar -czf jdk-spark-optimized.tar.gz -h jdk/
           ls -lh jdk-spark-optimized.tar.gz
           echo "JDK packaged successfully"
+
+          # Verify critical files are in the archive
+          echo "Verifying archive contents..."
+          tar -tzf jdk-spark-optimized.tar.gz | grep -E "(jvm.cfg|java$|libjvm.so)" | head -10
 
           # Create installation instructions
           cat > INSTALL.txt <<EOF
