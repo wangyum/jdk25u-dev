@@ -26,7 +26,7 @@ on:
 jobs:
   build-jdk-and-benchmark:
     runs-on: ubuntu-22.04
-    timeout-minutes: 240
+    timeout-minutes: 360  # Increased to 6 hours for building Spark from source
 
     steps:
       - name: Checkout JDK code
@@ -93,43 +93,32 @@ jobs:
           $JDK_HOME/bin/java -XX:+UnlockExperimentalVMOptions -XX:+PrintFlagsFinal -version 2>&1 | grep "G1OptimizeForSpark"
           $JDK_HOME/bin/java -XX:+UnlockExperimentalVMOptions -XX:+PrintFlagsFinal -version 2>&1 | grep "G1Spark" | head -20
 
-      - name: Install Scala
+      - name: Cache SBT and Ivy
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.sbt
+            ~/.ivy2/cache
+            ~/.m2/repository
+          key: ${{ runner.os }}-sbt-${{ hashFiles('**/build.sbt') }}
+          restore-keys: |
+            ${{ runner.os }}-sbt-
+
+      - name: Clone and build Apache Spark (java25 branch)
         run: |
-          wget https://downloads.lightbend.com/scala/2.12.18/scala-2.12.18.tgz
-          tar xzf scala-2.12.18.tgz
-          echo "SCALA_HOME=$(pwd)/scala-2.12.18" >> $GITHUB_ENV
-          echo "$(pwd)/scala-2.12.18/bin" >> $GITHUB_PATH
+          echo "Cloning Spark from java25 branch..."
+          git clone --depth 1 --branch java25 https://github.com/wangyum/spark.git spark-src
+          cd spark-src
 
-      - name: Install Apache Spark
-        run: |
-          # Download Spark 3.5.0 (or latest compatible version)
-          wget https://archive.apache.org/dist/spark/spark-3.5.0/spark-3.5.0-bin-hadoop3.tgz
-          tar xzf spark-3.5.0-bin-hadoop3.tgz
-          echo "SPARK_HOME=$(pwd)/spark-3.5.0-bin-hadoop3" >> $GITHUB_ENV
-          echo "$(pwd)/spark-3.5.0-bin-hadoop3/bin" >> $GITHUB_PATH
+          echo "SPARK_HOME=$(pwd)" >> $GITHUB_ENV
 
-      - name: Configure Spark to use custom JDK
-        run: |
-          echo "JAVA_HOME=$JDK_HOME" >> $SPARK_HOME/conf/spark-env.sh
-          cat >> $SPARK_HOME/conf/spark-defaults.conf <<EOF
-          spark.driver.extraJavaOptions -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark
-          spark.executor.extraJavaOptions -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark
-          spark.sql.shuffle.partitions 4
-          spark.default.parallelism 4
-          EOF
+          echo "Building Spark with custom JDK..."
+          export JAVA_HOME=$JDK_HOME
 
-      - name: Build Spark examples (includes TPCDSQueryBenchmark)
-        run: |
-          cd $SPARK_HOME
+          # Build Spark (this will take a while)
+          ./build/sbt -Dscala.version=2.13.15 -DskipTests clean package
 
-          # The Spark distribution should already have examples built
-          # If not, we can build them
-          if [ ! -f examples/target/scala-2.12/jars/spark-examples_2.12-3.5.0.jar ]; then
-            echo "Building Spark examples..."
-            ./build/mvn -DskipTests -pl examples -am package
-          fi
-
-          ls -lh examples/target/scala-2.12/jars/spark-examples*.jar
+          echo "Spark build completed"
 
       - name: Download TPC-DS 5GB dataset
         run: |
@@ -144,12 +133,6 @@ jobs:
           echo "Dataset extracted to: $(pwd)/tpcds_5GB"
           ls -lh tpcds_5GB/
 
-      - name: Clone tpcds-benchmark repository
-        run: |
-          git clone https://github.com/wangyum/tpcds-benchmark.git
-          cd tpcds-benchmark
-          echo "TPCDS_BENCHMARK=$(pwd)" >> $GITHUB_ENV
-
       - name: Run TPC-DS queries benchmark (Baseline - No Optimizations)
         run: |
           mkdir -p benchmark-results
@@ -158,20 +141,16 @@ jobs:
           echo "TPC-DS Benchmark - BASELINE (Standard JDK behavior)" | tee -a benchmark-output.log
           echo "========================================" | tee -a benchmark-output.log
 
-          cd $TPCDS_BENCHMARK
+          cd $SPARK_HOME
+
+          # Set JDK for sbt
+          export JAVA_HOME=$JDK_HOME
+          export PATH=$JAVA_HOME/bin:$PATH
 
           # Run without Spark optimizations (baseline)
-          $SPARK_HOME/bin/spark-submit \
-            --master local[4] \
-            --driver-memory 4g \
-            --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
-            --jars $(echo $SPARK_HOME/jars/*.jar | tr ' ' ',') \
-            --conf spark.driver.extraJavaOptions="-XX:+UseG1GC" \
-            --conf spark.executor.extraJavaOptions="-XX:+UseG1GC" \
-            --conf spark.sql.shuffle.partitions=4 \
-            $SPARK_HOME/examples/target/scala-2.12/jars/spark-examples_2.12-3.5.0.jar \
-            --data-location $TPCDS_DATA \
-            --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" 2>&1 | tee -a ../benchmark-output.log
+          export JAVA_OPTS="-Xmx4g -XX:+UseG1GC"
+
+          ./build/sbt "sql/Test/runMain org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark --data-location $TPCDS_DATA --query-filter q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" 2>&1 | tee -a ../benchmark-output.log
 
           echo "" | tee -a ../benchmark-output.log
 
@@ -181,20 +160,16 @@ jobs:
           echo "TPC-DS Benchmark - OPTIMIZED (Spark EA + TLAB + String Dedup)" | tee -a benchmark-output.log
           echo "========================================" | tee -a benchmark-output.log
 
-          cd $TPCDS_BENCHMARK
+          cd $SPARK_HOME
+
+          # Set JDK for sbt
+          export JAVA_HOME=$JDK_HOME
+          export PATH=$JAVA_HOME/bin:$PATH
 
           # Run with full Spark optimizations
-          $SPARK_HOME/bin/spark-submit \
-            --master local[4] \
-            --driver-memory 4g \
-            --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
-            --jars $(echo $SPARK_HOME/jars/*.jar | tr ' ' ',') \
-            --conf spark.driver.extraJavaOptions="-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization" \
-            --conf spark.executor.extraJavaOptions="-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization" \
-            --conf spark.sql.shuffle.partitions=4 \
-            $SPARK_HOME/examples/target/scala-2.12/jars/spark-examples_2.12-3.5.0.jar \
-            --data-location $TPCDS_DATA \
-            --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" 2>&1 | tee -a ../benchmark-output.log
+          export JAVA_OPTS="-Xmx4g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization"
+
+          ./build/sbt "sql/Test/runMain org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark --data-location $TPCDS_DATA --query-filter q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" 2>&1 | tee -a ../benchmark-output.log
 
           echo "" | tee -a ../benchmark-output.log
 
@@ -204,20 +179,16 @@ jobs:
           echo "TPC-DS Benchmark - OPTIMIZED (Run 2)" | tee -a benchmark-output.log
           echo "========================================" | tee -a benchmark-output.log
 
-          cd $TPCDS_BENCHMARK
+          cd $SPARK_HOME
+
+          # Set JDK for sbt
+          export JAVA_HOME=$JDK_HOME
+          export PATH=$JAVA_HOME/bin:$PATH
 
           # Run again to verify consistency
-          $SPARK_HOME/bin/spark-submit \
-            --master local[4] \
-            --driver-memory 4g \
-            --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
-            --jars $(echo $SPARK_HOME/jars/*.jar | tr ' ' ',') \
-            --conf spark.driver.extraJavaOptions="-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization" \
-            --conf spark.executor.extraJavaOptions="-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization" \
-            --conf spark.sql.shuffle.partitions=4 \
-            $SPARK_HOME/examples/target/scala-2.12/jars/spark-examples_2.12-3.5.0.jar \
-            --data-location $TPCDS_DATA \
-            --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" 2>&1 | tee -a ../benchmark-output.log
+          export JAVA_OPTS="-Xmx4g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization"
+
+          ./build/sbt "sql/Test/runMain org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark --data-location $TPCDS_DATA --query-filter q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" 2>&1 | tee -a ../benchmark-output.log
 
       - name: Extract and analyze benchmark results
         if: always()
@@ -237,9 +208,10 @@ jobs:
 
           ## Configuration
           - **JDK Build**: Custom Spark-Optimized JDK
-          - **Spark Version**: 3.5.0
+          - **Spark Version**: java25 branch (https://github.com/wangyum/spark/tree/java25)
           - **Dataset**: TPC-DS 5GB (pre-generated)
           - **Platform**: Ubuntu 22.04, 4 cores (compatible with 22.04+)
+          - **Benchmark Tool**: sbt "sql/Test/runMain TPCDSQueryBenchmark"
           - **Date**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
           - **Commit**: ${{ github.sha }}
 
@@ -247,6 +219,8 @@ jobs:
           1. **Baseline Run**: Standard G1GC (no Spark optimizations)
           2. **Optimized Run 1**: Full Spark optimizations enabled
           3. **Optimized Run 2**: Repeat for consistency validation
+
+          Built from source to ensure compatibility with JDK 25 and custom optimizations.
 
           ## Optimizations Enabled
           \`\`\`
@@ -294,9 +268,13 @@ jobs:
         run: |
           cd build/linux-x86_64-server-release
 
-          # Create compressed archive
-          tar -czf jdk-spark-optimized-benchmark.tar.gz jdk/
+          # Create compressed archive with -h to dereference symbolic links
+          tar -czf jdk-spark-optimized-benchmark.tar.gz -h jdk/
           ls -lh jdk-spark-optimized-benchmark.tar.gz
+
+          # Verify critical files are in the archive
+          echo "Verifying archive contents..."
+          tar -tzf jdk-spark-optimized-benchmark.tar.gz | grep -E "(jvm.cfg|java$|libjvm.so)" | head -10
 
           # Create installation instructions
           cat > INSTALL.txt <<EOF
