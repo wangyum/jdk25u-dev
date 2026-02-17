@@ -79,7 +79,43 @@ jobs:
           make images JOBS=4
           echo "BUILD_DIR=$(pwd)/build/linux-x86_64-server-release" >> $GITHUB_ENV
 
-      - name: Test JDK build
+      - name: Verify JDK build completeness
+        run: |
+          echo "=== Checking Critical JDK Files ==="
+
+          # Check java executable
+          if [ ! -f "$BUILD_DIR/jdk/bin/java" ]; then
+            echo "❌ ERROR: java executable not found!"
+            exit 1
+          fi
+
+          # Check modules file (CRITICAL - this is what's failing in sbt)
+          if [ ! -f "$BUILD_DIR/jdk/lib/modules" ]; then
+            echo "❌ ERROR: lib/modules file not found!"
+            echo "JDK build is incomplete. This file is required for the JDK to function."
+            echo "Listing lib directory contents:"
+            ls -lR $BUILD_DIR/jdk/lib/ || true
+            exit 1
+          fi
+
+          # Check jvm.cfg
+          if [ ! -f "$BUILD_DIR/jdk/lib/jvm.cfg" ] && [ ! -L "$BUILD_DIR/jdk/lib/jvm.cfg" ]; then
+            echo "❌ ERROR: lib/jvm.cfg not found!"
+            exit 1
+          fi
+
+          # Check libjvm.so
+          if [ ! -f "$BUILD_DIR/jdk/lib/server/libjvm.so" ]; then
+            echo "❌ ERROR: lib/server/libjvm.so not found!"
+            exit 1
+          fi
+
+          echo "✅ All critical files present:"
+          echo "  modules:  $(ls -lh $BUILD_DIR/jdk/lib/modules | awk '{print $5}')"
+          echo "  jvm.cfg:  $(ls -lh $BUILD_DIR/jdk/lib/jvm.cfg | awk '{print $5}')"
+          echo "  libjvm.so: $(ls -lh $BUILD_DIR/jdk/lib/server/libjvm.so | awk '{print $5}')"
+
+      - name: Test JDK runs
         run: |
           $BUILD_DIR/jdk/bin/java -Xshare:off -version
           $BUILD_DIR/jdk/bin/java -Xshare:off -version 2>&1 | grep "spark-opt"

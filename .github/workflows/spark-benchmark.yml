@@ -83,7 +83,42 @@ jobs:
           make images
           echo "JDK_HOME=$(pwd)/build/linux-x86_64-server-release/jdk" >> $GITHUB_ENV
 
-      - name: Verify JDK build
+      - name: Verify JDK build completeness
+        run: |
+          echo "Checking critical JDK files..."
+
+          # Check java executable
+          if [ ! -f "$JDK_HOME/bin/java" ]; then
+            echo "ERROR: java executable not found!"
+            exit 1
+          fi
+
+          # Check modules file (critical!)
+          if [ ! -f "$JDK_HOME/lib/modules" ]; then
+            echo "ERROR: lib/modules file not found!"
+            echo "JDK build is incomplete. This file is required for the JDK to function."
+            ls -lR $JDK_HOME/lib/ || true
+            exit 1
+          fi
+
+          # Check jvm.cfg
+          if [ ! -f "$JDK_HOME/lib/jvm.cfg" ] && [ ! -L "$JDK_HOME/lib/jvm.cfg" ]; then
+            echo "ERROR: lib/jvm.cfg not found!"
+            exit 1
+          fi
+
+          # Check libjvm.so
+          if [ ! -f "$JDK_HOME/lib/server/libjvm.so" ]; then
+            echo "ERROR: lib/server/libjvm.so not found!"
+            exit 1
+          fi
+
+          echo "✅ All critical files present"
+          ls -lh $JDK_HOME/lib/modules
+          ls -lh $JDK_HOME/lib/jvm.cfg
+          ls -lh $JDK_HOME/lib/server/libjvm.so
+
+      - name: Verify JDK runs
         run: |
           $JDK_HOME/bin/java -version
 
