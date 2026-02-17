@@ -81,7 +81,7 @@ jobs:
       - name: Build JDK
         run: |
           make images
-          echo "JDK_HOME=$(pwd)/build/linux-x86_64-server-release/jdk" >> $GITHUB_ENV
+          echo "JDK_HOME=$(pwd)/build/linux-x86_64-server-release/images/jdk" >> $GITHUB_ENV
 
       - name: Verify JDK build completeness
         run: |
@@ -301,7 +301,7 @@ jobs:
       - name: Package JDK for distribution
         if: success()
         run: |
-          cd build/linux-x86_64-server-release
+          cd build/linux-x86_64-server-release/images
 
           # Create compressed archive with -h to dereference symbolic links
           tar -czf jdk-spark-optimized-benchmark.tar.gz -h jdk/
@@ -360,8 +360,8 @@ jobs:
         with:
           name: jdk-spark-optimized-linux-x64-${{ github.sha }}
           path: |
-            build/linux-x86_64-server-release/jdk-spark-optimized-benchmark.tar.gz
-            build/linux-x86_64-server-release/INSTALL.txt
+            build/linux-x86_64-server-release/images/jdk-spark-optimized-benchmark.tar.gz
+            build/linux-x86_64-server-release/images/INSTALL.txt
           retention-days: 30
           compression-level: 0
 
