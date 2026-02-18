@@ -212,7 +212,7 @@ jobs:
           path: tpcds_5GB/
           retention-days: 1
 
-  run-baseline-benchmark:
+  run-benchmarks:
     runs-on: ubuntu-22.04
     timeout-minutes: 360  # 6 hours
     needs: [build-jdk, build-spark, download-dataset]
@@ -235,7 +235,7 @@ jobs:
           name: tpcds-dataset-${{ github.sha }}
           path: tpcds_5GB
 
-      - name: Run BASELINE benchmark
+      - name: Run both benchmarks in parallel using spark-submit
         run: |
           export JAVA_HOME=$(pwd)/jdk
           export PATH=$JAVA_HOME/bin:$PATH
@@ -243,19 +243,88 @@ jobs:
 
           cd spark-src
 
-          # Restore execute permissions (artifacts don't preserve permissions)
-          chmod +x build/sbt
+          # Find test jars
+          SPARK_CORE_TEST_JAR=$(ls sql/core/target/scala-2.13/spark-sql_2.13-*-tests.jar | head -1)
+          SPARK_CATALYST_TEST_JAR=$(ls sql/catalyst/target/scala-2.13/spark-catalyst_2.13-*-tests.jar | head -1)
+          SPARK_SQL_TEST_JAR=$(ls sql/core/target/scala-2.13/spark-sql_2.13-*-tests.jar | head -1)
 
-          echo "========================================" | tee ../benchmark-baseline.log
-          echo "TPC-DS Benchmark - BASELINE (Standard JDK)" | tee -a ../benchmark-baseline.log
-          echo "========================================" | tee -a ../benchmark-baseline.log
-          echo "Start: $(date)" | tee -a ../benchmark-baseline.log
+          echo "Test jars found:"
+          echo "  SPARK_SQL_TEST_JAR=$SPARK_SQL_TEST_JAR"
+          echo "  SPARK_CATALYST_TEST_JAR=$SPARK_CATALYST_TEST_JAR"
+          echo "  SPARK_CORE_TEST_JAR=$SPARK_CORE_TEST_JAR"
 
-          export JAVA_OPTS="-Xmx4g -XX:+UseG1GC"
+          # BASELINE benchmark in background
+          (
+            echo "========================================"
+            echo "TPC-DS Benchmark - BASELINE (Standard JDK)"
+            echo "========================================"
+            echo "Start: $(date)"
 
-          ./build/sbt "sql/Test/runMain org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark --data-location $TPCDS_DATA --query-filter q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" 2>&1 | tee -a ../benchmark-baseline.log
+            ./bin/spark-submit \
+              --master local[*] \
+              --driver-memory 4g \
+              --conf spark.driver.extraJavaOptions="-XX:+UseG1GC" \
+              --jars "$SPARK_CATALYST_TEST_JAR" \
+              --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
+              "$SPARK_SQL_TEST_JAR" \
+              --data-location "$TPCDS_DATA" \
+              --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96"
 
-          echo "End: $(date)" | tee -a ../benchmark-baseline.log
+            echo "End: $(date)"
+          ) > ../benchmark-baseline.log 2>&1 &
+          BASELINE_PID=$!
+          echo "BASELINE started with PID $BASELINE_PID"
+
+          # OPTIMIZED benchmark in background
+          (
+            echo "========================================"
+            echo "TPC-DS Benchmark - OPTIMIZED (Spark Optimizations)"
+            echo "========================================"
+            echo "Start: $(date)"
+
+            ./bin/spark-submit \
+              --master local[*] \
+              --driver-memory 4g \
+              --conf spark.driver.extraJavaOptions="-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization" \
+              --jars "$SPARK_CATALYST_TEST_JAR" \
+              --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
+              "$SPARK_SQL_TEST_JAR" \
+              --data-location "$TPCDS_DATA" \
+              --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96"
+
+            echo "End: $(date)"
+          ) > ../benchmark-optimized.log 2>&1 &
+          OPTIMIZED_PID=$!
+          echo "OPTIMIZED started with PID $OPTIMIZED_PID"
+
+          # Monitor both processes
+          echo ""
+          echo "Both benchmarks running in parallel..."
+          echo "BASELINE PID: $BASELINE_PID"
+          echo "OPTIMIZED PID: $OPTIMIZED_PID"
+
+          # Wait for both to complete
+          wait $BASELINE_PID
+          BASELINE_EXIT=$?
+          echo "BASELINE completed with exit code: $BASELINE_EXIT"
+
+          wait $OPTIMIZED_PID
+          OPTIMIZED_EXIT=$?
+          echo "OPTIMIZED completed with exit code: $OPTIMIZED_EXIT"
+
+          # Show summary
+          echo ""
+          echo "========================================"
+          echo "Benchmark Execution Summary"
+          echo "========================================"
+          echo "BASELINE exit code: $BASELINE_EXIT"
+          echo "OPTIMIZED exit code: $OPTIMIZED_EXIT"
+
+          # Exit with error if either failed
+          if [ $BASELINE_EXIT -ne 0 ] || [ $OPTIMIZED_EXIT -ne 0 ]; then
+            echo "One or more benchmarks failed"
+            exit 1
+          fi
 
       - name: Upload baseline results
         if: always()
@@ -264,51 +333,6 @@ jobs:
           name: baseline-results-${{ github.sha }}
           path: benchmark-baseline.log
           retention-days: 30
-
-  run-optimized-benchmark:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 360  # 6 hours
-    needs: [build-jdk, build-spark, download-dataset]
-    steps:
-      - name: Download JDK
-        uses: actions/download-artifact@v4
-        with:
-          name: jdk-build-${{ github.sha }}
-          path: jdk
-
-      - name: Download Spark
-        uses: actions/download-artifact@v4
-        with:
-          name: spark-build-${{ github.sha }}
-          path: spark-src
-
-      - name: Download TPC-DS dataset
-        uses: actions/download-artifact@v4
-        with:
-          name: tpcds-dataset-${{ github.sha }}
-          path: tpcds_5GB
-
-      - name: Run OPTIMIZED benchmark
-        run: |
-          export JAVA_HOME=$(pwd)/jdk
-          export PATH=$JAVA_HOME/bin:$PATH
-          export TPCDS_DATA=$(pwd)/tpcds_5GB
-
-          cd spark-src
-
-          # Restore execute permissions (artifacts don't preserve permissions)
-          chmod +x build/sbt
-
-          echo "========================================" | tee ../benchmark-optimized.log
-          echo "TPC-DS Benchmark - OPTIMIZED (Spark Optimizations)" | tee -a ../benchmark-optimized.log
-          echo "========================================" | tee -a ../benchmark-optimized.log
-          echo "Start: $(date)" | tee -a ../benchmark-optimized.log
-
-          export JAVA_OPTS="-Xmx4g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization"
-
-          ./build/sbt "sql/Test/runMain org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark --data-location $TPCDS_DATA --query-filter q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" 2>&1 | tee -a ../benchmark-optimized.log
-
-          echo "End: $(date)" | tee -a ../benchmark-optimized.log
 
       - name: Upload optimized results
         if: always()
@@ -321,7 +345,7 @@ jobs:
   compare-results:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
-    needs: [run-baseline-benchmark, run-optimized-benchmark]
+    needs: [run-benchmarks]
     if: always()
     steps:
       - name: Checkout code for comparison script
