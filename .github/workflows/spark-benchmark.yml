@@ -287,6 +287,15 @@ jobs:
             exit 1
           fi
 
+      - name: Checkout code for comparison script
+        if: always()
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/scripts
+          sparse-checkout-cone-mode: false
+          path: comparison-scripts
+
       - name: Analyze and compare benchmark results
         if: always()
         run: |
@@ -294,17 +303,34 @@ jobs:
           echo "Analyzing Benchmark Results"
           echo "========================================"
 
+          # Verify we're in the correct directory
+          echo "Current directory: $(pwd)"
+          ls -la comparison-scripts/.github/scripts/ 2>/dev/null || echo "ERROR: comparison-scripts/.github/scripts not found"
+
           # Check if both log files exist
           if [ ! -f benchmark-baseline.log ]; then
             echo "WARNING: baseline results not found"
+            ls -la benchmark*.log 2>/dev/null || echo "No benchmark logs found"
+          else
+            echo "✅ Baseline results found"
           fi
 
           if [ ! -f benchmark-optimized.log ]; then
             echo "WARNING: optimized results not found"
+            ls -la benchmark*.log 2>/dev/null || echo "No benchmark logs found"
+          else
+            echo "✅ Optimized results found"
           fi
 
           # Run the analysis
-          python3 .github/scripts/compare_results.py | tee comparison_output.txt
+          if [ -f comparison-scripts/.github/scripts/compare_results.py ]; then
+            python3 comparison-scripts/.github/scripts/compare_results.py | tee comparison_output.txt
+          else
+            echo "ERROR: compare_results.py not found!"
+            echo "Available files:"
+            find . -name "compare_results.py" 2>/dev/null || echo "Script not found anywhere"
+            exit 1
+          fi
 
       - name: Upload benchmark results and comparison
         if: always()
