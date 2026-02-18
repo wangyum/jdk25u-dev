@@ -24,12 +24,11 @@ on:
           - large
 
 jobs:
-  build-jdk-and-spark:
+  build-jdk:
     runs-on: ubuntu-22.04
-    timeout-minutes: 360  # 6 hours
+    timeout-minutes: 120  # 2 hours for JDK build
     outputs:
       jdk-artifact: ${{ steps.upload-jdk.outputs.artifact-id }}
-      spark-artifact: ${{ steps.upload-spark.outputs.artifact-id }}
 
     steps:
       - name: Checkout JDK code
@@ -131,6 +130,28 @@ jobs:
           $JDK_HOME/bin/java -XX:+UnlockExperimentalVMOptions -XX:+PrintFlagsFinal -version 2>&1 | grep "G1OptimizeForSpark"
           $JDK_HOME/bin/java -XX:+UnlockExperimentalVMOptions -XX:+PrintFlagsFinal -version 2>&1 | grep "G1Spark" | head -20
 
+      - name: Upload JDK artifact
+        id: upload-jdk
+        uses: actions/upload-artifact@v4
+        with:
+          name: jdk-build-${{ github.sha }}
+          path: build/linux-x86_64-server-release/images/jdk/
+          retention-days: 1
+
+  build-spark:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120  # 2 hours for Spark build
+    needs: [build-jdk]
+    outputs:
+      spark-artifact: ${{ steps.upload-spark.outputs.artifact-id }}
+
+    steps:
+      - name: Download JDK
+        uses: actions/download-artifact@v4
+        with:
+          name: jdk-build-${{ github.sha }}
+          path: jdk
+
       - name: Cache SBT and Ivy
         uses: actions/cache@v4
         with:
@@ -144,28 +165,21 @@ jobs:
 
       - name: Clone and build Apache Spark (java25 branch)
         run: |
+          export JAVA_HOME=$(pwd)/jdk
+          export PATH=$JAVA_HOME/bin:$PATH
+
           echo "Cloning Spark from java25 branch..."
           git clone --depth 1 --branch java25 https://github.com/wangyum/spark.git spark-src
 
           echo "Building Spark with custom JDK..."
           cd spark-src
-          export JAVA_HOME=$JDK_HOME
 
           # Build Spark (this will take a while)
           ./build/sbt -Dscala.version=2.13.15 -DskipTests clean package
 
           echo "Spark build completed"
-          echo "SPARK_HOME=$(pwd)" >> $GITHUB_ENV
 
-      - name: Upload JDK artifact for benchmark jobs
-        id: upload-jdk
-        uses: actions/upload-artifact@v4
-        with:
-          name: jdk-build-${{ github.sha }}
-          path: build/linux-x86_64-server-release/images/jdk/
-          retention-days: 1
-
-      - name: Upload Spark artifact for benchmark jobs
+      - name: Upload Spark artifact
         id: upload-spark
         uses: actions/upload-artifact@v4
         with:
@@ -201,7 +215,7 @@ jobs:
   run-baseline-benchmark:
     runs-on: ubuntu-22.04
     timeout-minutes: 360  # 6 hours
-    needs: [build-jdk-and-spark, download-dataset]
+    needs: [build-jdk, build-spark, download-dataset]
     steps:
       - name: Download JDK
         uses: actions/download-artifact@v4
@@ -229,6 +243,9 @@ jobs:
 
           cd spark-src
 
+          # Restore execute permissions (artifacts don't preserve permissions)
+          chmod +x build/sbt
+
           echo "========================================" | tee ../benchmark-baseline.log
           echo "TPC-DS Benchmark - BASELINE (Standard JDK)" | tee -a ../benchmark-baseline.log
           echo "========================================" | tee -a ../benchmark-baseline.log
@@ -251,7 +268,7 @@ jobs:
   run-optimized-benchmark:
     runs-on: ubuntu-22.04
     timeout-minutes: 360  # 6 hours
-    needs: [build-jdk-and-spark, download-dataset]
+    needs: [build-jdk, build-spark, download-dataset]
     steps:
       - name: Download JDK
         uses: actions/download-artifact@v4
@@ -278,6 +295,9 @@ jobs:
           export TPCDS_DATA=$(pwd)/tpcds_5GB
 
           cd spark-src
+
+          # Restore execute permissions (artifacts don't preserve permissions)
+          chmod +x build/sbt
 
           echo "========================================" | tee ../benchmark-optimized.log
           echo "TPC-DS Benchmark - OPTIMIZED (Spark Optimizations)" | tee -a ../benchmark-optimized.log
