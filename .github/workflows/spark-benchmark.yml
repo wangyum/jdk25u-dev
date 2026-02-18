@@ -24,12 +24,9 @@ on:
           - large
 
 jobs:
-  build-jdk:
+  benchmark-pipeline:
     runs-on: ubuntu-22.04
-    timeout-minutes: 120  # 2 hours for JDK build
-    outputs:
-      jdk-artifact: ${{ steps.upload-jdk.outputs.artifact-id }}
-
+    timeout-minutes: 720  # 12 hours total (2h JDK + 2h Spark + 6h benchmarks + buffer)
     steps:
       - name: Checkout JDK code
         uses: actions/checkout@v4
@@ -130,28 +127,6 @@ jobs:
           $JDK_HOME/bin/java -XX:+UnlockExperimentalVMOptions -XX:+PrintFlagsFinal -version 2>&1 | grep "G1OptimizeForSpark"
           $JDK_HOME/bin/java -XX:+UnlockExperimentalVMOptions -XX:+PrintFlagsFinal -version 2>&1 | grep "G1Spark" | head -20
 
-      - name: Upload JDK artifact
-        id: upload-jdk
-        uses: actions/upload-artifact@v4
-        with:
-          name: jdk-build-${{ github.sha }}
-          path: build/linux-x86_64-server-release/images/jdk/
-          retention-days: 1
-
-  build-spark:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 120  # 2 hours for Spark build
-    needs: [build-jdk]
-    outputs:
-      spark-artifact: ${{ steps.upload-spark.outputs.artifact-id }}
-
-    steps:
-      - name: Download JDK
-        uses: actions/download-artifact@v4
-        with:
-          name: jdk-build-${{ github.sha }}
-          path: jdk
-
       - name: Cache SBT and Ivy
         uses: actions/cache@v4
         with:
@@ -165,7 +140,7 @@ jobs:
 
       - name: Clone and build Apache Spark (java25 branch)
         run: |
-          export JAVA_HOME=$(pwd)/jdk
+          export JAVA_HOME=$JDK_HOME
           export PATH=$JAVA_HOME/bin:$PATH
 
           echo "Cloning Spark from java25 branch..."
@@ -178,31 +153,6 @@ jobs:
           ./build/sbt -Dscala.version=2.13.15 -DskipTests clean package
 
           echo "Spark build completed"
-
-      - name: Upload Spark artifact
-        id: upload-spark
-        uses: actions/upload-artifact@v4
-        with:
-          name: spark-build-${{ github.sha }}
-          path: spark-src/
-          retention-days: 1
-
-  run-benchmarks:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 360  # 6 hours
-    needs: [build-jdk, build-spark]
-    steps:
-      - name: Download JDK
-        uses: actions/download-artifact@v4
-        with:
-          name: jdk-build-${{ github.sha }}
-          path: jdk
-
-      - name: Download Spark
-        uses: actions/download-artifact@v4
-        with:
-          name: spark-build-${{ github.sha }}
-          path: spark-src
 
       - name: Download TPC-DS 5GB dataset
         run: |
@@ -217,7 +167,7 @@ jobs:
 
       - name: Run both benchmarks in parallel using spark-submit
         run: |
-          export JAVA_HOME=$(pwd)/jdk
+          export JAVA_HOME=$JDK_HOME
           export PATH=$JAVA_HOME/bin:$PATH
           export TPCDS_DATA=$(pwd)/tpcds_5GB
 
@@ -234,13 +184,14 @@ jobs:
           echo "  SPARK_CORE_TEST_JAR=$SPARK_CORE_TEST_JAR"
 
           # BASELINE benchmark in background
+          (
             echo "========================================"
             echo "TPC-DS Benchmark - BASELINE (Standard JDK)"
             echo "========================================"
             echo "Start: $(date)"
 
             ./bin/spark-submit \
-              --master local[2] \
+              --master local[*] \
               --driver-memory 4g \
               --conf spark.driver.extraJavaOptions="-XX:+UseG1GC" \
               --jars "$SPARK_CATALYST_TEST_JAR" \
@@ -250,6 +201,8 @@ jobs:
               --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96"
 
             echo "End: $(date)"
+          ) > ../benchmark-baseline.log 2>&1 &
+          BASELINE_PID=$!
           echo "BASELINE started with PID $BASELINE_PID"
 
           # OPTIMIZED benchmark in background
@@ -260,7 +213,7 @@ jobs:
             echo "Start: $(date)"
 
             ./bin/spark-submit \
-              --master local[2] \
+              --master local[*] \
               --driver-memory 4g \
               --conf spark.driver.extraJavaOptions="-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization" \
               --jars "$SPARK_CATALYST_TEST_JAR" \
@@ -303,47 +256,6 @@ jobs:
             exit 1
           fi
 
-      - name: Upload baseline results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: baseline-results-${{ github.sha }}
-          path: benchmark-baseline.log
-          retention-days: 30
-
-      - name: Upload optimized results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: optimized-results-${{ github.sha }}
-          path: benchmark-optimized.log
-          retention-days: 30
-
-  compare-results:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 30
-    needs: [run-benchmarks]
-    if: always()
-    steps:
-      - name: Checkout code for comparison script
-        uses: actions/checkout@v4
-        with:
-          sparse-checkout: |
-            .github/scripts
-          sparse-checkout-cone-mode: false
-
-      - name: Download baseline results
-        uses: actions/download-artifact@v4
-        with:
-          name: baseline-results-${{ github.sha }}
-        continue-on-error: true
-
-      - name: Download optimized results
-        uses: actions/download-artifact@v4
-        with:
-          name: optimized-results-${{ github.sha }}
-        continue-on-error: true
-
       - name: Analyze and compare benchmark results
         if: always()
         run: |
@@ -363,15 +275,14 @@ jobs:
           # Run the analysis
           python3 .github/scripts/compare_results.py | tee comparison_output.txt
 
-      - name: Upload comparison results
+      - name: Upload benchmark results and comparison
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: benchmark-comparison-${{ github.sha }}
+          name: benchmark-results-${{ github.sha }}
           path: |
             benchmark-baseline.log
             benchmark-optimized.log
             comparison_output.txt
             comparison_results.txt
-            compare_results.py
           retention-days: 30
