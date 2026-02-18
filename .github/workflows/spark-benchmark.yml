@@ -241,7 +241,7 @@ jobs:
             echo "Start: $(date)"
 
             ./bin/spark-submit \
-              --master local[*] \
+              --master local[2] \
               --driver-memory 4g \
               --conf spark.driver.extraJavaOptions="-XX:+UseG1GC" \
               --jars "$SPARK_CATALYST_TEST_JAR" \
@@ -263,7 +263,7 @@ jobs:
             echo "Start: $(date)"
 
             ./bin/spark-submit \
-              --master local[*] \
+              --master local[2] \
               --driver-memory 4g \
               --conf spark.driver.extraJavaOptions="-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization" \
               --jars "$SPARK_CATALYST_TEST_JAR" \
