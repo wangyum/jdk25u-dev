@@ -171,6 +171,14 @@ jobs:
             exit 1
           fi
 
+      - name: Checkout code for comparison script
+        if: always()
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/scripts
+          sparse-checkout-cone-mode: false
+
       - name: Compare G1GC vs ZGC results
         if: always()
         run: |
@@ -178,18 +186,22 @@ jobs:
           echo "Comparing G1GC vs ZGC Results"
           echo "========================================"
 
-          # The comparison script expects benchmark-baseline.log and benchmark-optimized.log
-          # Copy files with the expected names
+          # The logs are in the workspace root, comparison script expects specific names
+          # Copy files with the expected names for comparison script
           if [ -f benchmark-g1gc.log ]; then
             cp benchmark-g1gc.log benchmark-baseline.log
+            echo "✅ G1GC results found"
           else
-            echo "WARNING: G1GC results not found"
+            echo "WARNING: benchmark-g1gc.log not found"
+            ls -la benchmark*.log 2>/dev/null || echo "No benchmark logs found"
           fi
 
           if [ -f benchmark-zgc.log ]; then
             cp benchmark-zgc.log benchmark-optimized.log
+            echo "✅ ZGC results found"
           else
-            echo "WARNING: ZGC results not found"
+            echo "WARNING: benchmark-zgc.log not found"
+            ls -la benchmark*.log 2>/dev/null || echo "No benchmark logs found"
           fi
 
           # Run the comparison analysis

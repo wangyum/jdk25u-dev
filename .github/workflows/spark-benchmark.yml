@@ -184,6 +184,21 @@ jobs:
           echo "  SPARK_CATALYST_TEST_JAR=$SPARK_CATALYST_TEST_JAR"
           echo "  SPARK_SQL_TEST_JAR=$SPARK_SQL_TEST_JAR"
 
+          # Verify required jars exist
+          if [ -z "$SPARK_CORE_TEST_JAR" ] || [ ! -f "$SPARK_CORE_TEST_JAR" ]; then
+            echo "ERROR: spark-core test jar not found!"
+            echo "BenchmarkBase class will not be available"
+            find core/target -name "*.jar" | head -10
+            exit 1
+          fi
+
+          if [ -z "$SPARK_SQL_TEST_JAR" ] || [ ! -f "$SPARK_SQL_TEST_JAR" ]; then
+            echo "ERROR: spark-sql test jar not found!"
+            echo "TPCDSQueryBenchmark class will not be available"
+            find sql/core/target -name "*.jar" | head -10
+            exit 1
+          fi
+
           # Build comma-separated jars list (include core test jar for BenchmarkBase)
           JARS_LIST=""
           if [ -n "$SPARK_CORE_TEST_JAR" ] && [ -f "$SPARK_CORE_TEST_JAR" ]; then
