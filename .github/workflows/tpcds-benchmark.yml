@@ -59,7 +59,7 @@ jobs:
           echo "Dataset extracted"
           ls -lh tpcds_5GB/
 
-      - name: Run TPC-DS benchmark in background
+      - name: Run both benchmarks in parallel (G1GC vs ZGC)
         run: |
           export TPCDS_DATA=$(pwd)/tpcds_5GB
 
@@ -83,7 +83,7 @@ jobs:
             exit 1
           fi
 
-          # Build comma-separated jars list (include core test jar for BenchmarkBase)
+          # Build comma-separated jars list
           JARS_LIST=""
           if [ -n "$SPARK_CORE_TEST_JAR" ] && [ -f "$SPARK_CORE_TEST_JAR" ]; then
             JARS_LIST="$SPARK_CORE_TEST_JAR"
@@ -98,30 +98,111 @@ jobs:
 
           echo "Using jars: $JARS_LIST"
 
-          # Run TPC-DS benchmark
-          echo "========================================"
-          echo "TPC-DS Benchmark with JDK 25"
-          echo "========================================"
-          echo "Start: $(date)"
+          # G1GC benchmark in background
+          (
+            echo "========================================"
+            echo "TPC-DS Benchmark - G1GC"
+            echo "========================================"
+            echo "Start: $(date)"
 
-          ./bin/spark-submit \
-            --master local[*] \
-            --driver-memory 4g \
-            --conf spark.driver.extraJavaOptions="-XX:+UseG1GC -Dlog4j.rootCategory=WARN,console" \
-            --jars "$JARS_LIST" \
-            --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
-            "$SPARK_SQL_TEST_JAR" \
-            --data-location "$TPCDS_DATA" \
-            --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" \
-            2>&1 | tee ../benchmark-results.log
+            ./bin/spark-submit \
+              --master local[*] \
+              --driver-memory 4g \
+              --conf spark.driver.extraJavaOptions="-XX:+UseG1GC -Dlog4j.rootCategory=WARN,console" \
+              --jars "$JARS_LIST" \
+              --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
+              "$SPARK_SQL_TEST_JAR" \
+              --data-location "$TPCDS_DATA" \
+              --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96"
 
-          echo "End: $(date)"
+            echo "End: $(date)"
+          ) > ../benchmark-g1gc.log 2>&1 &
+          G1GC_PID=$!
+          echo "G1GC benchmark started with PID $G1GC_PID"
+
+          # ZGC benchmark in background
+          (
+            echo "========================================"
+            echo "TPC-DS Benchmark - ZGC"
+            echo "========================================"
+            echo "Start: $(date)"
+
+            ./bin/spark-submit \
+              --master local[*] \
+              --driver-memory 4g \
+              --conf spark.driver.extraJavaOptions="-XX:+UseZGC -Dlog4j.rootCategory=WARN,console" \
+              --jars "$JARS_LIST" \
+              --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
+              "$SPARK_SQL_TEST_JAR" \
+              --data-location "$TPCDS_DATA" \
+              --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96"
+
+            echo "End: $(date)"
+          ) > ../benchmark-zgc.log 2>&1 &
+          ZGC_PID=$!
+          echo "ZGC benchmark started with PID $ZGC_PID"
+
+          # Monitor both processes
+          echo ""
+          echo "Both benchmarks running in parallel..."
+          echo "G1GC PID: $G1GC_PID"
+          echo "ZGC PID: $ZGC_PID"
+
+          # Wait for both to complete
+          wait $G1GC_PID
+          G1GC_EXIT=$?
+          echo "G1GC benchmark completed with exit code: $G1GC_EXIT"
+
+          wait $ZGC_PID
+          ZGC_EXIT=$?
+          echo "ZGC benchmark completed with exit code: $ZGC_EXIT"
+
+          # Show summary
+          echo ""
+          echo "========================================"
+          echo "Benchmark Execution Summary"
+          echo "========================================"
+          echo "G1GC exit code: $G1GC_EXIT"
+          echo "ZGC exit code: $ZGC_EXIT"
+
+          # Exit with error if either failed
+          if [ $G1GC_EXIT -ne 0 ] || [ $ZGC_EXIT -ne 0 ]; then
+            echo "One or more benchmarks failed"
+            exit 1
+          fi
+
+      - name: Compare G1GC vs ZGC results
+        if: always()
+        run: |
+          echo "========================================"
+          echo "Comparing G1GC vs ZGC Results"
           echo "========================================"
 
-      - name: Upload benchmark results
+          # The comparison script expects benchmark-baseline.log and benchmark-optimized.log
+          # Copy files with the expected names
+          if [ -f benchmark-g1gc.log ]; then
+            cp benchmark-g1gc.log benchmark-baseline.log
+          else
+            echo "WARNING: G1GC results not found"
+          fi
+
+          if [ -f benchmark-zgc.log ]; then
+            cp benchmark-zgc.log benchmark-optimized.log
+          else
+            echo "WARNING: ZGC results not found"
+          fi
+
+          # Run the comparison analysis
+          python3 .github/scripts/compare_results.py | tee comparison_output.txt
+
+      - name: Upload benchmark results and comparison
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tpcds-benchmark-results-${{ github.sha }}
-          path: benchmark-results.log
+          name: tpcds-gc-comparison-${{ github.sha }}
+          path: |
+            benchmark-g1gc.log
+            benchmark-zgc.log
+            comparison_output.txt
+            comparison_results.txt
           retention-days: 30
