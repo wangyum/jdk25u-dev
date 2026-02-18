@@ -234,7 +234,6 @@ jobs:
           echo "  SPARK_CORE_TEST_JAR=$SPARK_CORE_TEST_JAR"
 
           # BASELINE benchmark in background
-          (
             echo "========================================"
             echo "TPC-DS Benchmark - BASELINE (Standard JDK)"
             echo "========================================"
@@ -251,8 +250,6 @@ jobs:
               --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96"
 
             echo "End: $(date)"
-          ) > ../benchmark-baseline.log 2>&1 &
-          BASELINE_PID=$!
           echo "BASELINE started with PID $BASELINE_PID"
 
           # OPTIMIZED benchmark in background
