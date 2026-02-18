@@ -168,6 +168,25 @@ jobs:
           echo "Dataset extracted to: $(pwd)/tpcds_5GB"
           ls -lh tpcds_5GB/
 
+      - name: Compile Spark SQL module and prepare classpath
+        run: |
+          cd $SPARK_HOME
+
+          export JAVA_HOME=$JDK_HOME
+          export PATH=$JAVA_HOME/bin:$PATH
+
+          echo "Compiling Spark SQL test classes..."
+          ./build/sbt "sql/Test/compile"
+
+          echo "Exporting classpath for direct java execution..."
+          ./build/sbt "sql/Test/exportClasspath" > /tmp/classpath.txt
+
+          # Extract the classpath from sbt output (last line)
+          BENCHMARK_CLASSPATH=$(tail -1 /tmp/classpath.txt)
+          echo "BENCHMARK_CLASSPATH=$BENCHMARK_CLASSPATH" >> $GITHUB_ENV
+
+          echo "Compilation complete. Benchmarks will run directly via java (no sbt overhead)."
+
       - name: Run TPC-DS benchmarks in parallel (Baseline & Optimized)
         run: |
           mkdir -p benchmark-results
@@ -184,33 +203,54 @@ jobs:
           export JAVA_HOME=$JDK_HOME
           export PATH=$JAVA_HOME/bin:$PATH
 
-          # Run BASELINE in background
+          # Run BASELINE in background (using java directly, no sbt)
           echo "Starting BASELINE benchmark..."
           (
-            export JAVA_OPTS="-Xmx4g -XX:+UseG1GC"
             echo "========================================" > ../benchmark-baseline.log
             echo "TPC-DS Benchmark - BASELINE (Standard JDK)" >> ../benchmark-baseline.log
             echo "========================================" >> ../benchmark-baseline.log
             echo "Start: $(date)" >> ../benchmark-baseline.log
-            ./build/sbt "sql/Test/runMain org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark --data-location $TPCDS_DATA --query-filter q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" 2>&1 >> ../benchmark-baseline.log
+
+            $JAVA_HOME/bin/java \
+              -Xmx4g \
+              -XX:+UseG1GC \
+              -cp "$BENCHMARK_CLASSPATH" \
+              org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
+              --data-location "$TPCDS_DATA" \
+              --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" \
+              2>&1 >> ../benchmark-baseline.log
+
             echo "End: $(date)" >> ../benchmark-baseline.log
             echo "BASELINE completed" > ../baseline.done
           ) &
           BASELINE_PID=$!
           echo "BASELINE started (PID: $BASELINE_PID)"
 
-          # Wait a moment to avoid resource contention at startup
-          sleep 5
+          # Small delay to stagger JVM startup
+          sleep 2
 
-          # Run OPTIMIZED in background
+          # Run OPTIMIZED in background (using java directly, no sbt)
           echo "Starting OPTIMIZED benchmark..."
           (
-            export JAVA_OPTS="-Xmx4g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization"
             echo "========================================" > ../benchmark-optimized.log
             echo "TPC-DS Benchmark - OPTIMIZED (Spark Optimizations)" >> ../benchmark-optimized.log
             echo "========================================" >> ../benchmark-optimized.log
             echo "Start: $(date)" >> ../benchmark-optimized.log
-            ./build/sbt "sql/Test/runMain org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark --data-location $TPCDS_DATA --query-filter q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" 2>&1 >> ../benchmark-optimized.log
+
+            $JAVA_HOME/bin/java \
+              -Xmx4g \
+              -XX:+UseG1GC \
+              -XX:+UnlockExperimentalVMOptions \
+              -XX:+G1OptimizeForSpark \
+              -XX:+G1SparkEnhanceEscapeAnalysis \
+              -XX:+G1SparkOptimizeHashOperations \
+              -XX:+G1SparkEnableVectorization \
+              -cp "$BENCHMARK_CLASSPATH" \
+              org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
+              --data-location "$TPCDS_DATA" \
+              --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" \
+              2>&1 >> ../benchmark-optimized.log
+
             echo "End: $(date)" >> ../benchmark-optimized.log
             echo "OPTIMIZED completed" > ../optimized.done
           ) &
