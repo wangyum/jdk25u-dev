@@ -150,7 +150,7 @@ jobs:
           cd spark-src
 
           # Build Spark (this will take a while)
-          ./build/sbt -Dscala.version=2.13.15 -DskipTests clean package
+          ./build/mvn -DskipTests clean package
 
           echo "Spark build completed"
 
