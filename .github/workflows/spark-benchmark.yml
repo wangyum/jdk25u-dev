@@ -149,8 +149,8 @@ jobs:
           echo "Building Spark with custom JDK..."
           cd spark-src
 
-          # Build Spark (this will take a while)
-          ./build/mvn -DskipTests clean package
+          # Build Spark with SBT and create test jars (without running tests)
+          ./build/sbt clean package Test/packageBin
 
           echo "Spark build completed"
 
@@ -174,14 +174,12 @@ jobs:
           cd spark-src
 
           # Find test jars
-          SPARK_CORE_TEST_JAR=$(ls sql/core/target/scala-2.13/spark-sql_2.13-*-tests.jar | head -1)
           SPARK_CATALYST_TEST_JAR=$(ls sql/catalyst/target/scala-2.13/spark-catalyst_2.13-*-tests.jar | head -1)
           SPARK_SQL_TEST_JAR=$(ls sql/core/target/scala-2.13/spark-sql_2.13-*-tests.jar | head -1)
 
           echo "Test jars found:"
           echo "  SPARK_SQL_TEST_JAR=$SPARK_SQL_TEST_JAR"
           echo "  SPARK_CATALYST_TEST_JAR=$SPARK_CATALYST_TEST_JAR"
-          echo "  SPARK_CORE_TEST_JAR=$SPARK_CORE_TEST_JAR"
 
           # BASELINE benchmark in background
           (
