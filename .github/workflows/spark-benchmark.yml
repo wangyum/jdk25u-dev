@@ -240,16 +240,35 @@ jobs:
           OPTIMIZED_PID=$!
           echo "OPTIMIZED started (PID: $OPTIMIZED_PID) in $SPARK_OPTIMIZED"
 
-          # Wait for both to complete
+          echo ""
+          echo "Tailing log files to show progress..."
+          echo "========================================"
+
+          # Start tailing both log files to show progress
+          tail -f $GITHUB_WORKSPACE/benchmark-baseline.log --pid=$BASELINE_PID 2>/dev/null | sed 's/^/[BASELINE] /' &
+          TAIL_BASELINE_PID=$!
+
+          tail -f $GITHUB_WORKSPACE/benchmark-optimized.log --pid=$OPTIMIZED_PID 2>/dev/null | sed 's/^/[OPTIMIZED] /' &
+          TAIL_OPTIMIZED_PID=$!
+
+          # Wait for both benchmarks to complete
           echo ""
           echo "Waiting for benchmarks to complete..."
           wait $BASELINE_PID
           BASELINE_EXIT=$?
+          echo ""
           echo "BASELINE finished (exit code: $BASELINE_EXIT)"
 
           wait $OPTIMIZED_PID
           OPTIMIZED_EXIT=$?
           echo "OPTIMIZED finished (exit code: $OPTIMIZED_EXIT)"
+
+          # Give tail processes a moment to catch up
+          sleep 2
+
+          # Kill tail processes if still running
+          kill $TAIL_BASELINE_PID 2>/dev/null || true
+          kill $TAIL_OPTIMIZED_PID 2>/dev/null || true
 
           echo ""
           echo "End time: $(date)" | tee -a ../benchmark-summary.log
