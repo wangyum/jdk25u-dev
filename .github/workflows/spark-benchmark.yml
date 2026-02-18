@@ -24,9 +24,12 @@ on:
           - large
 
 jobs:
-  build-jdk-and-benchmark:
+  build-jdk-and-spark:
     runs-on: ubuntu-22.04
-    timeout-minutes: 360  # Increased to 6 hours for building Spark from source
+    timeout-minutes: 360  # 6 hours
+    outputs:
+      jdk-artifact: ${{ steps.upload-jdk.outputs.artifact-id }}
+      spark-artifact: ${{ steps.upload-spark.outputs.artifact-id }}
 
     steps:
       - name: Checkout JDK code
@@ -154,23 +157,28 @@ jobs:
           echo "Spark build completed"
           echo "SPARK_HOME=$(pwd)" >> $GITHUB_ENV
 
-      - name: Create separate Spark copy for parallel execution
-        run: |
-          echo "Creating separate Spark directories for parallel benchmark execution..."
+      - name: Upload JDK artifact for benchmark jobs
+        id: upload-jdk
+        uses: actions/upload-artifact@v4
+        with:
+          name: jdk-build-${{ github.sha }}
+          path: build/linux-x86_64-server-release/images/jdk/
+          retention-days: 1
 
-          # Copy spark-src to spark-baseline (for baseline benchmark)
-          cp -r spark-src spark-baseline
-          echo "SPARK_BASELINE=$(pwd)/spark-baseline" >> $GITHUB_ENV
+      - name: Upload Spark artifact for benchmark jobs
+        id: upload-spark
+        uses: actions/upload-artifact@v4
+        with:
+          name: spark-build-${{ github.sha }}
+          path: spark-src/
+          retention-days: 1
 
-          # Copy spark-src to spark-optimized (for optimized benchmark)
-          cp -r spark-src spark-optimized
-          echo "SPARK_OPTIMIZED=$(pwd)/spark-optimized" >> $GITHUB_ENV
-
-          echo "Created two independent Spark directories:"
-          echo "  - spark-baseline: for baseline benchmark"
-          echo "  - spark-optimized: for optimized benchmark"
-          echo "Both can now run sbt in parallel without interference!"
-
+  download-dataset:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    outputs:
+      dataset-artifact: ${{ steps.upload-dataset.outputs.artifact-id }}
+    steps:
       - name: Download TPC-DS 5GB dataset
         run: |
           echo "Downloading pre-generated TPC-DS 5GB dataset..."
@@ -179,112 +187,141 @@ jobs:
           echo "Extracting dataset..."
           tar -xzf tpcds_5GB.tgz
 
-          echo "TPCDS_DATA=$(pwd)/tpcds_5GB" >> $GITHUB_ENV
-
-          echo "Dataset extracted to: $(pwd)/tpcds_5GB"
+          echo "Dataset extracted"
           ls -lh tpcds_5GB/
 
-      - name: Run TPC-DS benchmarks in parallel (Baseline & Optimized)
+      - name: Upload dataset artifact
+        id: upload-dataset
+        uses: actions/upload-artifact@v4
+        with:
+          name: tpcds-dataset-${{ github.sha }}
+          path: tpcds_5GB/
+          retention-days: 1
+
+  run-baseline-benchmark:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360  # 6 hours
+    needs: [build-jdk-and-spark, download-dataset]
+    steps:
+      - name: Download JDK
+        uses: actions/download-artifact@v4
+        with:
+          name: jdk-build-${{ github.sha }}
+          path: jdk
+
+      - name: Download Spark
+        uses: actions/download-artifact@v4
+        with:
+          name: spark-build-${{ github.sha }}
+          path: spark-src
+
+      - name: Download TPC-DS dataset
+        uses: actions/download-artifact@v4
+        with:
+          name: tpcds-dataset-${{ github.sha }}
+          path: tpcds_5GB
+
+      - name: Run BASELINE benchmark
         run: |
-          mkdir -p benchmark-results
-
-          echo "========================================" | tee benchmark-summary.log
-          echo "Running Baseline and Optimized benchmarks in parallel"
-          echo "Each in separate Spark directory to avoid SBT interference"
-          echo "========================================" | tee -a benchmark-summary.log
-          echo "Start time: $(date)" | tee -a benchmark-summary.log
-          echo ""
-
-          # Set JDK for both
-          export JAVA_HOME=$JDK_HOME
+          export JAVA_HOME=$(pwd)/jdk
           export PATH=$JAVA_HOME/bin:$PATH
+          export TPCDS_DATA=$(pwd)/tpcds_5GB
 
-          # Run BASELINE in its own Spark directory
-          echo "Starting BASELINE benchmark in $SPARK_BASELINE..."
-          (
-            cd $SPARK_BASELINE
-            export JAVA_OPTS="-Xmx4g -XX:+UseG1GC"
-            echo "========================================" > $GITHUB_WORKSPACE/benchmark-baseline.log
-            echo "TPC-DS Benchmark - BASELINE (Standard JDK)" >> $GITHUB_WORKSPACE/benchmark-baseline.log
-            echo "Working directory: $(pwd)" >> $GITHUB_WORKSPACE/benchmark-baseline.log
-            echo "========================================" >> $GITHUB_WORKSPACE/benchmark-baseline.log
-            echo "Start: $(date)" >> $GITHUB_WORKSPACE/benchmark-baseline.log
+          cd spark-src
 
-            ./build/sbt "sql/Test/runMain org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark --data-location $TPCDS_DATA --query-filter q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" 2>&1 >> $GITHUB_WORKSPACE/benchmark-baseline.log
+          echo "========================================" | tee ../benchmark-baseline.log
+          echo "TPC-DS Benchmark - BASELINE (Standard JDK)" | tee -a ../benchmark-baseline.log
+          echo "========================================" | tee -a ../benchmark-baseline.log
+          echo "Start: $(date)" | tee -a ../benchmark-baseline.log
 
-            echo "End: $(date)" >> $GITHUB_WORKSPACE/benchmark-baseline.log
-            echo "BASELINE completed" > $GITHUB_WORKSPACE/baseline.done
-          ) &
-          BASELINE_PID=$!
-          echo "BASELINE started (PID: $BASELINE_PID) in $SPARK_BASELINE"
+          export JAVA_OPTS="-Xmx4g -XX:+UseG1GC"
 
-          # Small delay to stagger startup
-          sleep 2
+          ./build/sbt "sql/Test/runMain org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark --data-location $TPCDS_DATA --query-filter q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" 2>&1 | tee -a ../benchmark-baseline.log
 
-          # Run OPTIMIZED in its own Spark directory
-          echo "Starting OPTIMIZED benchmark in $SPARK_OPTIMIZED..."
-          (
-            cd $SPARK_OPTIMIZED
-            export JAVA_OPTS="-Xmx4g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization"
-            echo "========================================" > $GITHUB_WORKSPACE/benchmark-optimized.log
-            echo "TPC-DS Benchmark - OPTIMIZED (Spark Optimizations)" >> $GITHUB_WORKSPACE/benchmark-optimized.log
-            echo "Working directory: $(pwd)" >> $GITHUB_WORKSPACE/benchmark-optimized.log
-            echo "========================================" >> $GITHUB_WORKSPACE/benchmark-optimized.log
-            echo "Start: $(date)" >> $GITHUB_WORKSPACE/benchmark-optimized.log
+          echo "End: $(date)" | tee -a ../benchmark-baseline.log
 
-            ./build/sbt "sql/Test/runMain org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark --data-location $TPCDS_DATA --query-filter q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" 2>&1 >> $GITHUB_WORKSPACE/benchmark-optimized.log
+      - name: Upload baseline results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-results-${{ github.sha }}
+          path: benchmark-baseline.log
+          retention-days: 30
 
-            echo "End: $(date)" >> $GITHUB_WORKSPACE/benchmark-optimized.log
-            echo "OPTIMIZED completed" > $GITHUB_WORKSPACE/optimized.done
-          ) &
-          OPTIMIZED_PID=$!
-          echo "OPTIMIZED started (PID: $OPTIMIZED_PID) in $SPARK_OPTIMIZED"
+  run-optimized-benchmark:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360  # 6 hours
+    needs: [build-jdk-and-spark, download-dataset]
+    steps:
+      - name: Download JDK
+        uses: actions/download-artifact@v4
+        with:
+          name: jdk-build-${{ github.sha }}
+          path: jdk
 
-          echo ""
-          echo "Tailing log files to show progress..."
-          echo "========================================"
+      - name: Download Spark
+        uses: actions/download-artifact@v4
+        with:
+          name: spark-build-${{ github.sha }}
+          path: spark-src
 
-          # Start tailing both log files to show progress
-          tail -f $GITHUB_WORKSPACE/benchmark-baseline.log --pid=$BASELINE_PID 2>/dev/null | sed 's/^/[BASELINE] /' &
-          TAIL_BASELINE_PID=$!
+      - name: Download TPC-DS dataset
+        uses: actions/download-artifact@v4
+        with:
+          name: tpcds-dataset-${{ github.sha }}
+          path: tpcds_5GB
 
-          tail -f $GITHUB_WORKSPACE/benchmark-optimized.log --pid=$OPTIMIZED_PID 2>/dev/null | sed 's/^/[OPTIMIZED] /' &
-          TAIL_OPTIMIZED_PID=$!
+      - name: Run OPTIMIZED benchmark
+        run: |
+          export JAVA_HOME=$(pwd)/jdk
+          export PATH=$JAVA_HOME/bin:$PATH
+          export TPCDS_DATA=$(pwd)/tpcds_5GB
 
-          # Wait for both benchmarks to complete
-          echo ""
-          echo "Waiting for benchmarks to complete..."
-          wait $BASELINE_PID
-          BASELINE_EXIT=$?
-          echo ""
-          echo "BASELINE finished (exit code: $BASELINE_EXIT)"
+          cd spark-src
 
-          wait $OPTIMIZED_PID
-          OPTIMIZED_EXIT=$?
-          echo "OPTIMIZED finished (exit code: $OPTIMIZED_EXIT)"
+          echo "========================================" | tee ../benchmark-optimized.log
+          echo "TPC-DS Benchmark - OPTIMIZED (Spark Optimizations)" | tee -a ../benchmark-optimized.log
+          echo "========================================" | tee -a ../benchmark-optimized.log
+          echo "Start: $(date)" | tee -a ../benchmark-optimized.log
 
-          # Give tail processes a moment to catch up
-          sleep 2
+          export JAVA_OPTS="-Xmx4g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization"
 
-          # Kill tail processes if still running
-          kill $TAIL_BASELINE_PID 2>/dev/null || true
-          kill $TAIL_OPTIMIZED_PID 2>/dev/null || true
+          ./build/sbt "sql/Test/runMain org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark --data-location $TPCDS_DATA --query-filter q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" 2>&1 | tee -a ../benchmark-optimized.log
 
-          echo ""
-          echo "End time: $(date)" | tee -a ../benchmark-summary.log
+          echo "End: $(date)" | tee -a ../benchmark-optimized.log
 
-          # Check if both completed successfully
-          if [ $BASELINE_EXIT -ne 0 ]; then
-            echo "ERROR: BASELINE benchmark failed!"
-            exit 1
-          fi
+      - name: Upload optimized results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: optimized-results-${{ github.sha }}
+          path: benchmark-optimized.log
+          retention-days: 30
 
-          if [ $OPTIMIZED_EXIT -ne 0 ]; then
-            echo "ERROR: OPTIMIZED benchmark failed!"
-            exit 1
-          fi
+  compare-results:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    needs: [run-baseline-benchmark, run-optimized-benchmark]
+    if: always()
+    steps:
+      - name: Checkout code for comparison script
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/scripts
+          sparse-checkout-cone-mode: false
 
-          echo "Both benchmarks completed successfully!" | tee -a ../benchmark-summary.log
+      - name: Download baseline results
+        uses: actions/download-artifact@v4
+        with:
+          name: baseline-results-${{ github.sha }}
+        continue-on-error: true
+
+      - name: Download optimized results
+        uses: actions/download-artifact@v4
+        with:
+          name: optimized-results-${{ github.sha }}
+        continue-on-error: true
 
       - name: Analyze and compare benchmark results
         if: always()
@@ -293,333 +330,27 @@ jobs:
           echo "Analyzing Benchmark Results"
           echo "========================================"
 
-          # Create analysis script to parse and compare results
-          cat > compare_results.py <<'PYTHON'
-          import re
-          import sys
+          # Check if both log files exist
+          if [ ! -f benchmark-baseline.log ]; then
+            echo "WARNING: baseline results not found"
+          fi
 
-          def parse_benchmark_log(filename):
-              """Parse TPC-DS benchmark log and extract query times."""
-              results = {}
-              try:
-                  with open(filename, 'r') as f:
-                      content = f.read()
-                      # Look for patterns like: q3: 1234 ms, q7: 5678 ms, etc.
-                      # Or: Query q3 took 1234 ms
-                      # Or benchmark result tables
-                      for line in content.split('\n'):
-                          # Pattern 1: "q3: 1234 ms" or "q3 1234 ms"
-                          match = re.search(r'q(\d+)[:\s]+(\d+(?:\.\d+)?)\s*(ms|seconds?)', line, re.IGNORECASE)
-                          if match:
-                              query_num = match.group(1)
-                              time_val = float(match.group(2))
-                              unit = match.group(3).lower()
-                              if 'second' in unit:
-                                  time_val *= 1000  # Convert to ms
-                              results[f'q{query_num}'] = time_val
-
-                          # Pattern 2: Table format "| q3 | 1234 |"
-                          match = re.search(r'\|\s*q(\d+)\s*\|\s*(\d+(?:\.\d+)?)\s*\|', line)
-                          if match:
-                              query_num = match.group(1)
-                              time_val = float(match.group(2))
-                              results[f'q{query_num}'] = time_val
-              except Exception as e:
-                  print(f"Error parsing {filename}: {e}", file=sys.stderr)
-
-              return results
-
-          def compare_results(baseline, optimized):
-              """Compare baseline and optimized results."""
-              all_queries = sorted(set(baseline.keys()) | set(optimized.keys()))
-
-              if not all_queries:
-                  return None
-
-              comparisons = []
-              total_baseline = 0
-              total_optimized = 0
-
-              for query in all_queries:
-                  b_time = baseline.get(query, 0)
-                  o_time = optimized.get(query, 0)
-
-                  if b_time > 0 and o_time > 0:
-                      improvement = ((b_time - o_time) / b_time) * 100
-                      total_baseline += b_time
-                      total_optimized += o_time
-                      comparisons.append({
-                          'query': query,
-                          'baseline': b_time,
-                          'optimized': o_time,
-                          'improvement': improvement
-                      })
-
-              return comparisons, total_baseline, total_optimized
-
-          # Main execution
-          baseline = parse_benchmark_log('benchmark-baseline.log')
-          optimized = parse_benchmark_log('benchmark-optimized.log')
-
-          print("\n" + "="*60)
-          print("QUERY-BY-QUERY COMPARISON")
-          print("="*60)
-
-          if not baseline or not optimized:
-              print("\n⚠️  Could not extract timing data from logs.")
-              print("Manual review of logs required.")
-              print("\nBaseline queries found:", len(baseline))
-              print("Optimized queries found:", len(optimized))
-          else:
-              result = compare_results(baseline, optimized)
-              if result:
-                  comparisons, total_baseline, total_optimized = result
-
-                  print(f"\n{'Query':<10} {'Baseline (ms)':<15} {'Optimized (ms)':<15} {'Improvement':<15}")
-                  print("-" * 60)
-
-                  for comp in comparisons:
-                      improvement_str = f"{comp['improvement']:+.1f}%"
-                      if comp['improvement'] > 0:
-                          improvement_str = f"✅ {improvement_str}"
-                      elif comp['improvement'] < -5:  # Regression > 5%
-                          improvement_str = f"❌ {improvement_str}"
-                      else:
-                          improvement_str = f"   {improvement_str}"
-
-                      print(f"{comp['query']:<10} {comp['baseline']:<15.1f} {comp['optimized']:<15.1f} {improvement_str:<15}")
-
-                  if total_baseline > 0:
-                      overall = ((total_baseline - total_optimized) / total_baseline) * 100
-                      print("-" * 60)
-                      print(f"{'TOTAL':<10} {total_baseline:<15.1f} {total_optimized:<15.1f} {overall:+.1f}%")
-                      print("\n" + "="*60)
-                      print(f"Overall Performance: {overall:+.1f}% improvement")
-                      print("="*60)
-
-                  # Save results to file
-                  with open('comparison_results.txt', 'w') as f:
-                      f.write(f"Query,Baseline(ms),Optimized(ms),Improvement(%)\n")
-                      for comp in comparisons:
-                          f.write(f"{comp['query']},{comp['baseline']:.1f},{comp['optimized']:.1f},{comp['improvement']:.1f}\n")
-                      if total_baseline > 0:
-                          overall = ((total_baseline - total_optimized) / total_baseline) * 100
-                          f.write(f"TOTAL,{total_baseline:.1f},{total_optimized:.1f},{overall:.1f}\n")
-          PYTHON
+          if [ ! -f benchmark-optimized.log ]; then
+            echo "WARNING: optimized results not found"
+          fi
 
           # Run the analysis
-          python3 compare_results.py | tee comparison_output.txt
+          python3 .github/scripts/compare_results.py | tee comparison_output.txt
 
-          # Create comprehensive summary report
-          cat > benchmark-summary.md <<EOF
-          # TPC-DS Query Benchmark Results
-
-          ## Configuration
-          - **JDK Build**: Custom Spark-Optimized JDK
-          - **Spark Version**: java25 branch (https://github.com/wangyum/spark/tree/java25)
-          - **Dataset**: TPC-DS 5GB (pre-generated)
-          - **Platform**: Ubuntu 22.04 (GLIBC 2.35 - compatible with 22.04+)
-          - **Benchmark Tool**: sbt "sql/Test/runMain TPCDSQueryBenchmark"
-          - **Date**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          - **Commit**: ${{ github.sha }}
-
-          ## Test Methodology
-          Both benchmarks ran **in parallel** for fair comparison:
-          1. **BASELINE**: Standard G1GC (no Spark optimizations)
-          2. **OPTIMIZED**: Full Spark optimizations enabled
-
-          Built from source to ensure compatibility with JDK 25 and custom optimizations.
-
-          ## Optimizations Enabled
-          \`\`\`bash
-          -XX:+UseG1GC
-          -XX:+UnlockExperimentalVMOptions
-          -XX:+G1OptimizeForSpark                    # Master flag
-          -XX:+G1SparkEnhanceEscapeAnalysis          # Aggressive EA (15-35% gain)
-          -XX:+G1SparkOptimizeHashOperations         # Hash tracking infrastructure
-          -XX:+G1SparkEnableVectorization            # Loop vectorization hints
-          # Plus: TLAB sizing, String deduplication
-          \`\`\`
-
-          ## Benchmark Queries
-          Selected TPC-DS queries: q3, q7, q19, q27, q42, q43, q52, q55, q63, q65, q68, q73, q79, q96
-          (Mix of filter-heavy, aggregation, and join operations)
-
-          ## Performance Results
-
-          ### Baseline Performance
-          \`\`\`
-          $(tail -30 benchmark-baseline.log | grep -A20 "Benchmark\|Query\|time\|duration" || echo "See full log below")
-          \`\`\`
-
-          ### Optimized Performance
-          \`\`\`
-          $(tail -30 benchmark-optimized.log | grep -A20 "Benchmark\|Query\|time\|duration" || echo "See full log below")
-          \`\`\`
-
-          ## Performance Improvement
-
-          ### Query-by-Query Comparison
-
-          \`\`\`
-          $(cat comparison_output.txt 2>/dev/null || echo "Comparison data not available - check logs manually")
-          \`\`\`
-
-          ### Detailed Results Table
-
-          $(if [ -f comparison_results.txt ]; then
-            echo "| Query | Baseline (ms) | Optimized (ms) | Improvement |"
-            echo "|-------|---------------|----------------|-------------|"
-            tail -n +2 comparison_results.txt | while IFS=, read -r query baseline optimized improvement; do
-              if [ "$query" = "TOTAL" ]; then
-                echo "| **$query** | **$baseline** | **$optimized** | **${improvement}%** |"
-              else
-                echo "| $query | $baseline | $optimized | ${improvement}% |"
-              fi
-            done
-          else
-            echo "> Automated comparison not available. Manual review required."
-            echo ""
-            echo "**Expected improvements based on workload type:**"
-            echo "- **CPU-bound queries** (heavy allocation): 20-40% improvement"
-            echo "- **I/O-bound queries** (shuffle, Parquet): <5% improvement"
-            echo "- **Mixed workloads**: 10-25% improvement"
-          fi)
-
-          ## Full Benchmark Logs
-
-          <details>
-          <summary>📊 Baseline Benchmark Log</summary>
-
-          \`\`\`
-          $(cat benchmark-baseline.log 2>/dev/null || echo "No output available")
-          \`\`\`
-
-          </details>
-
-          <details>
-          <summary>🚀 Optimized Benchmark Log</summary>
-
-          \`\`\`
-          $(cat benchmark-optimized.log 2>/dev/null || echo "No output available")
-          \`\`\`
-
-          </details>
-
-          ## Optimizations Status
-          | Feature | Status | Impact |
-          |---------|--------|--------|
-          | Aggressive Escape Analysis | ✅ Active | 15-35% |
-          | TLAB Sizing | ✅ Active | 15-25% |
-          | String Deduplication | ✅ Active | 10-20% |
-          | Vectorization Hints | ✅ Active | 0-10% |
-          | MurmurHash3 Assembly | ⏳ Ready | 0% (pending integration) |
-
-          EOF
-
-          cat benchmark-summary.md
-
-      - name: Package JDK for distribution
-        if: success()
-        run: |
-          cd build/linux-x86_64-server-release/images
-
-          # Create compressed archive with -h to dereference symbolic links
-          tar -czf jdk-spark-optimized-benchmark.tar.gz -h jdk/
-          ls -lh jdk-spark-optimized-benchmark.tar.gz
-
-          # Verify critical files are in the archive
-          echo "Verifying archive contents..."
-          tar -tzf jdk-spark-optimized-benchmark.tar.gz | grep -E "(jvm.cfg|java$|libjvm.so)" | head -10
-
-          # Create installation instructions
-          cat > INSTALL.txt <<EOF
-          Spark-Optimized JDK - Benchmark Build
-          ======================================
-
-          Build: ${{ github.sha }}
-          Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          Platform: Linux x86_64
-          Benchmark Scale: ${{ github.event.inputs.benchmark_scale || 'small' }}
-
-          This JDK was built and validated with TPC-DS benchmarks.
-
-          Installation:
-          1. Extract: tar -xzf jdk-spark-optimized-benchmark.tar.gz
-          2. Set JAVA_HOME: export JAVA_HOME=\$(pwd)/jdk
-          3. Add to PATH: export PATH=\$JAVA_HOME/bin:\$PATH
-          4. Verify: java -version
-
-          Spark Configuration (tested):
-
-          spark.executor.extraJavaOptions:
-            -XX:+UseG1GC
-            -XX:+UnlockExperimentalVMOptions
-            -XX:+G1OptimizeForSpark
-
-          spark.driver.extraJavaOptions:
-            -XX:+UseG1GC
-            -XX:+UnlockExperimentalVMOptions
-            -XX:+G1OptimizeForSpark
-
-          Optimizations Included (29 flags):
-          - Phase 1: GC Optimization (8 flags) - 5-15% gain
-          - Phase 2: TLAB Optimization (7 flags) - 8-15% gain
-          - Phase 3: String Dedup (3 flags) - 5-12% gain
-          - Phase 4: Hash Intrinsics (3 flags) - infrastructure
-          - Phase 5: Escape Analysis (3 flags) - infrastructure
-          - Phase 6: Vectorization (5 flags) - infrastructure
-
-          Expected combined improvement: 18-40%
-
-          See benchmark results artifact for performance validation.
-          EOF
-
-      - name: Upload JDK build archive
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: jdk-spark-optimized-linux-x64-${{ github.sha }}
-          path: |
-            build/linux-x86_64-server-release/images/jdk-spark-optimized-benchmark.tar.gz
-            build/linux-x86_64-server-release/images/INSTALL.txt
-          retention-days: 30
-          compression-level: 0
-
-      - name: Upload benchmark results
+      - name: Upload comparison results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: spark-benchmark-results-${{ github.event.inputs.benchmark_scale || 'small' }}-${{ github.sha }}
+          name: benchmark-comparison-${{ github.sha }}
           path: |
-            benchmark-results/
             benchmark-baseline.log
             benchmark-optimized.log
-            benchmark-summary.log
-            benchmark-summary.md
             comparison_output.txt
             comparison_results.txt
             compare_results.py
-            baseline.done
-            optimized.done
           retention-days: 30
-
-      - name: Comment PR with results
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            let summary = 'Benchmark results not available';
-            try {
-              summary = fs.readFileSync('benchmark-summary.md', 'utf8');
-            } catch (e) {
-              console.log('Could not read summary:', e);
-            }
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: summary
-            });
