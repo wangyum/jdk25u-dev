@@ -187,35 +187,10 @@ jobs:
           path: spark-src/
           retention-days: 1
 
-  download-dataset:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 30
-    outputs:
-      dataset-artifact: ${{ steps.upload-dataset.outputs.artifact-id }}
-    steps:
-      - name: Download TPC-DS 5GB dataset
-        run: |
-          echo "Downloading pre-generated TPC-DS 5GB dataset..."
-          wget https://github.com/wangyum/tpcds-benchmark/raw/master/tpcds_5GB.tgz
-
-          echo "Extracting dataset..."
-          tar -xzf tpcds_5GB.tgz
-
-          echo "Dataset extracted"
-          ls -lh tpcds_5GB/
-
-      - name: Upload dataset artifact
-        id: upload-dataset
-        uses: actions/upload-artifact@v4
-        with:
-          name: tpcds-dataset-${{ github.sha }}
-          path: tpcds_5GB/
-          retention-days: 1
-
   run-benchmarks:
     runs-on: ubuntu-22.04
     timeout-minutes: 360  # 6 hours
-    needs: [build-jdk, build-spark, download-dataset]
+    needs: [build-jdk, build-spark]
     steps:
       - name: Download JDK
         uses: actions/download-artifact@v4
@@ -229,11 +204,16 @@ jobs:
           name: spark-build-${{ github.sha }}
           path: spark-src
 
-      - name: Download TPC-DS dataset
-        uses: actions/download-artifact@v4
-        with:
-          name: tpcds-dataset-${{ github.sha }}
-          path: tpcds_5GB
+      - name: Download TPC-DS 5GB dataset
+        run: |
+          echo "Downloading pre-generated TPC-DS 5GB dataset..."
+          wget https://github.com/wangyum/tpcds-benchmark/raw/master/tpcds_5GB.tgz
+
+          echo "Extracting dataset..."
+          tar -xzf tpcds_5GB.tgz
+
+          echo "Dataset extracted"
+          ls -lh tpcds_5GB/
 
       - name: Run both benchmarks in parallel using spark-submit
         run: |
