@@ -178,6 +178,7 @@ jobs:
           sparse-checkout: |
             .github/scripts
           sparse-checkout-cone-mode: false
+          path: comparison-scripts
 
       - name: Compare G1GC vs ZGC results
         if: always()
@@ -185,6 +186,10 @@ jobs:
           echo "========================================"
           echo "Comparing G1GC vs ZGC Results"
           echo "========================================"
+
+          # Verify we're in the correct directory
+          echo "Current directory: $(pwd)"
+          ls -la comparison-scripts/.github/scripts/ 2>/dev/null || echo "ERROR: comparison-scripts/.github/scripts not found"
 
           # The logs are in the workspace root, comparison script expects specific names
           # Copy files with the expected names for comparison script
@@ -205,7 +210,14 @@ jobs:
           fi
 
           # Run the comparison analysis
-          python3 .github/scripts/compare_results.py | tee comparison_output.txt
+          if [ -f comparison-scripts/.github/scripts/compare_results.py ]; then
+            python3 comparison-scripts/.github/scripts/compare_results.py | tee comparison_output.txt
+          else
+            echo "ERROR: compare_results.py not found!"
+            echo "Available files:"
+            find . -name "compare_results.py" 2>/dev/null || echo "Script not found anywhere"
+            exit 1
+          fi
 
       - name: Upload benchmark results and comparison
         if: always()
