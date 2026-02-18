@@ -1,0 +1,109 @@
+name: TPC-DS Benchmark with JDK 25
+
+on:
+  push:
+    branches:
+      - main
+      - spark
+  workflow_dispatch:
+
+jobs:
+  tpcds-benchmark:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360  # 6 hours
+
+    steps:
+      - name: Install JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+
+      - name: Verify Java version
+        run: |
+          java -version
+          echo "JAVA_HOME=$JAVA_HOME"
+
+      - name: Cache SBT and Ivy
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.sbt
+            ~/.ivy2/cache
+            ~/.m2/repository
+          key: ${{ runner.os }}-sbt-spark-java25
+          restore-keys: |
+            ${{ runner.os }}-sbt-
+
+      - name: Clone and build Apache Spark (java25 branch)
+        run: |
+          echo "Cloning Spark from java25 branch..."
+          git clone --depth 1 --branch java25 https://github.com/wangyum/spark.git spark-src
+
+          echo "Building Spark with JDK 25..."
+          cd spark-src
+
+          # Build Spark with SBT and create test jars
+          ./build/sbt clean package Test/packageBin
+
+          echo "Spark build completed"
+
+      - name: Download TPC-DS 5GB dataset
+        run: |
+          echo "Downloading pre-generated TPC-DS 5GB dataset..."
+          wget https://github.com/wangyum/tpcds-benchmark/raw/master/tpcds_5GB.tgz
+
+          echo "Extracting dataset..."
+          tar -xzf tpcds_5GB.tgz
+
+          echo "Dataset extracted"
+          ls -lh tpcds_5GB/
+
+      - name: Run TPC-DS benchmark in background
+        run: |
+          export TPCDS_DATA=$(pwd)/tpcds_5GB
+
+          cd spark-src
+
+          # Find test jars
+          SPARK_CATALYST_TEST_JAR=$(ls sql/catalyst/target/scala-2.13/spark-catalyst_2.13-*-tests.jar 2>/dev/null | head -1)
+          SPARK_SQL_TEST_JAR=$(ls sql/core/target/scala-2.13/spark-sql_2.13-*-tests.jar 2>/dev/null | head -1)
+
+          echo "Test jars found:"
+          echo "  SPARK_SQL_TEST_JAR=$SPARK_SQL_TEST_JAR"
+          echo "  SPARK_CATALYST_TEST_JAR=$SPARK_CATALYST_TEST_JAR"
+
+          # Verify test jars exist
+          if [ -z "$SPARK_SQL_TEST_JAR" ] || [ ! -f "$SPARK_SQL_TEST_JAR" ]; then
+            echo "ERROR: spark-sql test jar not found!"
+            find sql/core/target -name "*-tests.jar" | head -10
+            exit 1
+          fi
+
+          # Run TPC-DS benchmark
+          echo "========================================"
+          echo "TPC-DS Benchmark with JDK 25"
+          echo "========================================"
+          echo "Start: $(date)"
+
+          ./bin/spark-submit \
+            --master local[*] \
+            --driver-memory 4g \
+            --conf spark.driver.extraJavaOptions="-XX:+UseG1GC" \
+            --jars "$SPARK_CATALYST_TEST_JAR" \
+            --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
+            "$SPARK_SQL_TEST_JAR" \
+            --data-location "$TPCDS_DATA" \
+            --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" \
+            2>&1 | tee ../benchmark-results.log
+
+          echo "End: $(date)"
+          echo "========================================"
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tpcds-benchmark-results-${{ github.sha }}
+          path: benchmark-results.log
+          retention-days: 30
