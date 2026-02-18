@@ -26,6 +26,15 @@ def parse_benchmark_log(filename):
                     query_num = match.group(1)
                     time_val = float(match.group(2))
                     results[f'q{query_num}'] = time_val
+
+                # Pattern 3: Spark benchmark table format
+                # "q96                                                2699           3085         546"
+                # Format: query_name (with trailing spaces) best_time avg_time stdev ...
+                match = re.search(r'^(q\d+)\s+(\d+)\s+\d+\s+\d+\s+', line)
+                if match:
+                    query_name = match.group(1)
+                    best_time = float(match.group(2))
+                    results[query_name] = best_time
     except Exception as e:
         print(f"Error parsing {filename}: {e}", file=sys.stderr)
 
