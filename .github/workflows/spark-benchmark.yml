@@ -209,7 +209,7 @@ jobs:
             ./bin/spark-submit \
               --master local[*] \
               --driver-memory 4g \
-              --conf spark.driver.extraJavaOptions="-XX:+UseG1GC" \
+              --conf spark.driver.extraJavaOptions="-XX:+UseG1GC -Dlog4j.rootCategory=WARN,console" \
               --jars "$JARS_LIST" \
               --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
               "$SPARK_SQL_TEST_JAR" \
@@ -231,7 +231,7 @@ jobs:
             ./bin/spark-submit \
               --master local[*] \
               --driver-memory 4g \
-              --conf spark.driver.extraJavaOptions="-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization" \
+              --conf spark.driver.extraJavaOptions="-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization -Dlog4j.rootCategory=WARN,console" \
               --jars "$JARS_LIST" \
               --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
               "$SPARK_SQL_TEST_JAR" \
