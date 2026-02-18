@@ -173,13 +173,31 @@ jobs:
 
           cd spark-src
 
-          # Find test jars
-          SPARK_CATALYST_TEST_JAR=$(ls sql/catalyst/target/scala-2.13/spark-catalyst_2.13-*-tests.jar | head -1)
-          SPARK_SQL_TEST_JAR=$(ls sql/core/target/scala-2.13/spark-sql_2.13-*-tests.jar | head -1)
+          # Find all necessary test jars
+          echo "Finding test jars..."
+          SPARK_CORE_TEST_JAR=$(ls core/target/scala-2.13/spark-core_2.13-*-tests.jar 2>/dev/null | head -1)
+          SPARK_CATALYST_TEST_JAR=$(ls sql/catalyst/target/scala-2.13/spark-catalyst_2.13-*-tests.jar 2>/dev/null | head -1)
+          SPARK_SQL_TEST_JAR=$(ls sql/core/target/scala-2.13/spark-sql_2.13-*-tests.jar 2>/dev/null | head -1)
 
           echo "Test jars found:"
-          echo "  SPARK_SQL_TEST_JAR=$SPARK_SQL_TEST_JAR"
+          echo "  SPARK_CORE_TEST_JAR=$SPARK_CORE_TEST_JAR"
           echo "  SPARK_CATALYST_TEST_JAR=$SPARK_CATALYST_TEST_JAR"
+          echo "  SPARK_SQL_TEST_JAR=$SPARK_SQL_TEST_JAR"
+
+          # Build comma-separated jars list (include core test jar for BenchmarkBase)
+          JARS_LIST=""
+          if [ -n "$SPARK_CORE_TEST_JAR" ] && [ -f "$SPARK_CORE_TEST_JAR" ]; then
+            JARS_LIST="$SPARK_CORE_TEST_JAR"
+          fi
+          if [ -n "$SPARK_CATALYST_TEST_JAR" ] && [ -f "$SPARK_CATALYST_TEST_JAR" ]; then
+            if [ -n "$JARS_LIST" ]; then
+              JARS_LIST="$JARS_LIST,$SPARK_CATALYST_TEST_JAR"
+            else
+              JARS_LIST="$SPARK_CATALYST_TEST_JAR"
+            fi
+          fi
+
+          echo "Using jars: $JARS_LIST"
 
           # BASELINE benchmark in background
           (
@@ -192,7 +210,7 @@ jobs:
               --master local[*] \
               --driver-memory 4g \
               --conf spark.driver.extraJavaOptions="-XX:+UseG1GC" \
-              --jars "$SPARK_CATALYST_TEST_JAR" \
+              --jars "$JARS_LIST" \
               --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
               "$SPARK_SQL_TEST_JAR" \
               --data-location "$TPCDS_DATA" \
@@ -214,7 +232,7 @@ jobs:
               --master local[*] \
               --driver-memory 4g \
               --conf spark.driver.extraJavaOptions="-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization" \
-              --jars "$SPARK_CATALYST_TEST_JAR" \
+              --jars "$JARS_LIST" \
               --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
               "$SPARK_SQL_TEST_JAR" \
               --data-location "$TPCDS_DATA" \
