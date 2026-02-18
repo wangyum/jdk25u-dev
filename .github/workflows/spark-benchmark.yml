@@ -143,17 +143,33 @@ jobs:
         run: |
           echo "Cloning Spark from java25 branch..."
           git clone --depth 1 --branch java25 https://github.com/wangyum/spark.git spark-src
-          cd spark-src
-
-          echo "SPARK_HOME=$(pwd)" >> $GITHUB_ENV
 
           echo "Building Spark with custom JDK..."
+          cd spark-src
           export JAVA_HOME=$JDK_HOME
 
           # Build Spark (this will take a while)
           ./build/sbt -Dscala.version=2.13.15 -DskipTests clean package
 
           echo "Spark build completed"
+          echo "SPARK_HOME=$(pwd)" >> $GITHUB_ENV
+
+      - name: Create separate Spark copy for parallel execution
+        run: |
+          echo "Creating separate Spark directories for parallel benchmark execution..."
+
+          # Copy spark-src to spark-baseline (for baseline benchmark)
+          cp -r spark-src spark-baseline
+          echo "SPARK_BASELINE=$(pwd)/spark-baseline" >> $GITHUB_ENV
+
+          # Copy spark-src to spark-optimized (for optimized benchmark)
+          cp -r spark-src spark-optimized
+          echo "SPARK_OPTIMIZED=$(pwd)/spark-optimized" >> $GITHUB_ENV
+
+          echo "Created two independent Spark directories:"
+          echo "  - spark-baseline: for baseline benchmark"
+          echo "  - spark-optimized: for optimized benchmark"
+          echo "Both can now run sbt in parallel without interference!"
 
       - name: Download TPC-DS 5GB dataset
         run: |
@@ -168,94 +184,61 @@ jobs:
           echo "Dataset extracted to: $(pwd)/tpcds_5GB"
           ls -lh tpcds_5GB/
 
-      - name: Compile Spark SQL module and prepare classpath
-        run: |
-          cd $SPARK_HOME
-
-          export JAVA_HOME=$JDK_HOME
-          export PATH=$JAVA_HOME/bin:$PATH
-
-          echo "Compiling Spark SQL test classes..."
-          ./build/sbt "sql/Test/compile"
-
-          echo "Exporting classpath for direct java execution..."
-          ./build/sbt "sql/Test/exportClasspath" > /tmp/classpath.txt
-
-          # Extract the classpath from sbt output (last line)
-          BENCHMARK_CLASSPATH=$(tail -1 /tmp/classpath.txt)
-          echo "BENCHMARK_CLASSPATH=$BENCHMARK_CLASSPATH" >> $GITHUB_ENV
-
-          echo "Compilation complete. Benchmarks will run directly via java (no sbt overhead)."
-
       - name: Run TPC-DS benchmarks in parallel (Baseline & Optimized)
         run: |
           mkdir -p benchmark-results
 
           echo "========================================" | tee benchmark-summary.log
           echo "Running Baseline and Optimized benchmarks in parallel"
+          echo "Each in separate Spark directory to avoid SBT interference"
           echo "========================================" | tee -a benchmark-summary.log
           echo "Start time: $(date)" | tee -a benchmark-summary.log
           echo ""
 
-          cd $SPARK_HOME
-
-          # Set JDK for sbt
+          # Set JDK for both
           export JAVA_HOME=$JDK_HOME
           export PATH=$JAVA_HOME/bin:$PATH
 
-          # Run BASELINE in background (using java directly, no sbt)
-          echo "Starting BASELINE benchmark..."
+          # Run BASELINE in its own Spark directory
+          echo "Starting BASELINE benchmark in $SPARK_BASELINE..."
           (
-            echo "========================================" > ../benchmark-baseline.log
-            echo "TPC-DS Benchmark - BASELINE (Standard JDK)" >> ../benchmark-baseline.log
-            echo "========================================" >> ../benchmark-baseline.log
-            echo "Start: $(date)" >> ../benchmark-baseline.log
+            cd $SPARK_BASELINE
+            export JAVA_OPTS="-Xmx4g -XX:+UseG1GC"
+            echo "========================================" > $GITHUB_WORKSPACE/benchmark-baseline.log
+            echo "TPC-DS Benchmark - BASELINE (Standard JDK)" >> $GITHUB_WORKSPACE/benchmark-baseline.log
+            echo "Working directory: $(pwd)" >> $GITHUB_WORKSPACE/benchmark-baseline.log
+            echo "========================================" >> $GITHUB_WORKSPACE/benchmark-baseline.log
+            echo "Start: $(date)" >> $GITHUB_WORKSPACE/benchmark-baseline.log
 
-            $JAVA_HOME/bin/java \
-              -Xmx4g \
-              -XX:+UseG1GC \
-              -cp "$BENCHMARK_CLASSPATH" \
-              org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
-              --data-location "$TPCDS_DATA" \
-              --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" \
-              2>&1 >> ../benchmark-baseline.log
+            ./build/sbt "sql/Test/runMain org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark --data-location $TPCDS_DATA --query-filter q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" 2>&1 >> $GITHUB_WORKSPACE/benchmark-baseline.log
 
-            echo "End: $(date)" >> ../benchmark-baseline.log
-            echo "BASELINE completed" > ../baseline.done
+            echo "End: $(date)" >> $GITHUB_WORKSPACE/benchmark-baseline.log
+            echo "BASELINE completed" > $GITHUB_WORKSPACE/baseline.done
           ) &
           BASELINE_PID=$!
-          echo "BASELINE started (PID: $BASELINE_PID)"
+          echo "BASELINE started (PID: $BASELINE_PID) in $SPARK_BASELINE"
 
-          # Small delay to stagger JVM startup
+          # Small delay to stagger startup
           sleep 2
 
-          # Run OPTIMIZED in background (using java directly, no sbt)
-          echo "Starting OPTIMIZED benchmark..."
+          # Run OPTIMIZED in its own Spark directory
+          echo "Starting OPTIMIZED benchmark in $SPARK_OPTIMIZED..."
           (
-            echo "========================================" > ../benchmark-optimized.log
-            echo "TPC-DS Benchmark - OPTIMIZED (Spark Optimizations)" >> ../benchmark-optimized.log
-            echo "========================================" >> ../benchmark-optimized.log
-            echo "Start: $(date)" >> ../benchmark-optimized.log
+            cd $SPARK_OPTIMIZED
+            export JAVA_OPTS="-Xmx4g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization"
+            echo "========================================" > $GITHUB_WORKSPACE/benchmark-optimized.log
+            echo "TPC-DS Benchmark - OPTIMIZED (Spark Optimizations)" >> $GITHUB_WORKSPACE/benchmark-optimized.log
+            echo "Working directory: $(pwd)" >> $GITHUB_WORKSPACE/benchmark-optimized.log
+            echo "========================================" >> $GITHUB_WORKSPACE/benchmark-optimized.log
+            echo "Start: $(date)" >> $GITHUB_WORKSPACE/benchmark-optimized.log
 
-            $JAVA_HOME/bin/java \
-              -Xmx4g \
-              -XX:+UseG1GC \
-              -XX:+UnlockExperimentalVMOptions \
-              -XX:+G1OptimizeForSpark \
-              -XX:+G1SparkEnhanceEscapeAnalysis \
-              -XX:+G1SparkOptimizeHashOperations \
-              -XX:+G1SparkEnableVectorization \
-              -cp "$BENCHMARK_CLASSPATH" \
-              org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
-              --data-location "$TPCDS_DATA" \
-              --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" \
-              2>&1 >> ../benchmark-optimized.log
+            ./build/sbt "sql/Test/runMain org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark --data-location $TPCDS_DATA --query-filter q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" 2>&1 >> $GITHUB_WORKSPACE/benchmark-optimized.log
 
-            echo "End: $(date)" >> ../benchmark-optimized.log
-            echo "OPTIMIZED completed" > ../optimized.done
+            echo "End: $(date)" >> $GITHUB_WORKSPACE/benchmark-optimized.log
+            echo "OPTIMIZED completed" > $GITHUB_WORKSPACE/optimized.done
           ) &
           OPTIMIZED_PID=$!
-          echo "OPTIMIZED started (PID: $OPTIMIZED_PID)"
+          echo "OPTIMIZED started (PID: $OPTIMIZED_PID) in $SPARK_OPTIMIZED"
 
           # Wait for both to complete
           echo ""
