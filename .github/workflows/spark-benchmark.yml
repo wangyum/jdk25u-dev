@@ -224,7 +224,7 @@ jobs:
           ./bin/spark-submit \
             --master local[1] \
             --driver-memory 3g \
-            --conf spark.driver.extraJavaOptions="-XX:+UseG1GC" \
+            --conf spark.driver.extraJavaOptions="-Xms3g -Xmx3g -XX:+UseG1GC -XX:+AlwaysPreTouch" \
             --conf spark.driver.log.level=ERROR \
             --jars "$JARS_LIST" \
             --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
@@ -245,7 +245,7 @@ jobs:
           ./bin/spark-submit \
             --master local[1] \
             --driver-memory 3g \
-            --conf spark.driver.extraJavaOptions="-XX:+UseG1GC" \
+            --conf spark.driver.extraJavaOptions="-Xms3g -Xmx3g -XX:+UseG1GC -XX:+AlwaysPreTouch" \
             --conf spark.driver.log.level=WARN \
             --conf spark.executor.log.level=WARN \
             --jars "$JARS_LIST" \
@@ -269,7 +269,7 @@ jobs:
           ./bin/spark-submit \
             --master local[1] \
             --driver-memory 3g \
-            --conf spark.driver.extraJavaOptions="-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization" \
+            --conf spark.driver.extraJavaOptions="-Xms3g -Xmx3g -XX:+UseG1GC -XX:+AlwaysPreTouch -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization" \
             --conf spark.driver.log.level=WARN \
             --conf spark.executor.log.level=WARN \
             --jars "$JARS_LIST" \

@@ -108,7 +108,7 @@ jobs:
           ./bin/spark-submit \
             --master local[1] \
             --driver-memory 3g \
-            --conf spark.driver.extraJavaOptions="-XX:+UseG1GC" \
+            --conf spark.driver.extraJavaOptions="-Xms3g -Xmx3g -XX:+UseG1GC -XX:+AlwaysPreTouch" \
             --conf spark.driver.log.level=ERROR \
             --jars "$JARS_LIST" \
             --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
@@ -129,7 +129,7 @@ jobs:
           ./bin/spark-submit \
             --master local[1] \
             --driver-memory 3g \
-            --conf spark.driver.extraJavaOptions="-XX:+UseG1GC" \
+            --conf spark.driver.extraJavaOptions="-Xms3g -Xmx3g -XX:+UseG1GC -XX:+AlwaysPreTouch" \
             --conf spark.driver.log.level=WARN \
             --conf spark.executor.log.level=WARN \
             --jars "$JARS_LIST" \
@@ -153,7 +153,7 @@ jobs:
           ./bin/spark-submit \
             --master local[1] \
             --driver-memory 3g \
-            --conf spark.driver.extraJavaOptions="-XX:+UseZGC" \
+            --conf spark.driver.extraJavaOptions="-Xms3g -Xmx3g -XX:+UseZGC -XX:+AlwaysPreTouch" \
             --conf spark.driver.log.level=WARN \
             --conf spark.executor.log.level=WARN \
             --jars "$JARS_LIST" \
