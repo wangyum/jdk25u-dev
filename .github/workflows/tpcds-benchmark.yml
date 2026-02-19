@@ -132,7 +132,7 @@ jobs:
             ./bin/spark-submit \
               --master local[2] \
               --driver-memory 4g \
-              --conf spark.driver.extraJavaOptions="-XX:+UseZGC" \
+              --conf spark.driver.extraJavaOptions="-XX:+UseG1GC" \
               --conf spark.driver.log.level=WARN \
               --conf spark.executor.log.level=WARN \
               --jars "$JARS_LIST" \
