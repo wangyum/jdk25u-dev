@@ -59,7 +59,7 @@ jobs:
           echo "Dataset extracted"
           ls -lh tpcds_5GB/
 
-      - name: Run benchmarks sequentially with warmup (G1GC vs ZGC)
+      - name: Setup benchmark environment and validate test jars
         run: |
           export TPCDS_DATA=$(pwd)/tpcds_5GB
 
@@ -98,8 +98,15 @@ jobs:
 
           echo "Using jars: $JARS_LIST"
 
-          # Warmup run (discard results)
-          echo ""
+          # Save environment variables for subsequent steps
+          echo "TPCDS_DATA=$TPCDS_DATA" >> $GITHUB_ENV
+          echo "JARS_LIST=$JARS_LIST" >> $GITHUB_ENV
+          echo "SPARK_SQL_TEST_JAR=$SPARK_SQL_TEST_JAR" >> $GITHUB_ENV
+
+      - name: Warmup run (JIT warmup)
+        run: |
+          cd spark-src
+
           echo "========================================"
           echo "Warmup Run (JIT warmup)"
           echo "========================================"
@@ -117,10 +124,12 @@ jobs:
             --query-filter "q3" \
             > ../warmup.log 2>&1
 
-          echo "Warmup completed"
-          echo ""
+          echo "✅ Warmup completed"
 
-          # G1GC benchmark (sequential, not background)
+      - name: Run G1GC benchmark
+        run: |
+          cd spark-src
+
           echo "========================================"
           echo "TPC-DS Benchmark - G1GC"
           echo "========================================"
@@ -139,12 +148,13 @@ jobs:
             --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" \
             > ../benchmark-g1gc.log 2>&1
 
-          G1GC_EXIT=$?
           echo "End: $(date)"
-          echo "G1GC benchmark completed with exit code: $G1GC_EXIT"
-          echo ""
+          echo "✅ G1GC benchmark completed"
 
-          # ZGC benchmark (sequential, runs after G1GC)
+      - name: Run ZGC benchmark
+        run: |
+          cd spark-src
+
           echo "========================================"
           echo "TPC-DS Benchmark - ZGC"
           echo "========================================"
@@ -163,23 +173,8 @@ jobs:
             --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" \
             > ../benchmark-zgc.log 2>&1
 
-          ZGC_EXIT=$?
           echo "End: $(date)"
-          echo "ZGC benchmark completed with exit code: $ZGC_EXIT"
-
-          # Show summary
-          echo ""
-          echo "========================================"
-          echo "Benchmark Execution Summary"
-          echo "========================================"
-          echo "G1GC exit code: $G1GC_EXIT"
-          echo "ZGC exit code: $ZGC_EXIT"
-
-          # Exit with error if either failed
-          if [ $G1GC_EXIT -ne 0 ] || [ $ZGC_EXIT -ne 0 ]; then
-            echo "One or more benchmarks failed"
-            exit 1
-          fi
+          echo "✅ ZGC benchmark completed"
 
       - name: Checkout code for comparison script
         if: always()

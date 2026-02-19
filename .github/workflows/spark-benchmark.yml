@@ -165,7 +165,7 @@ jobs:
           echo "Dataset extracted"
           ls -lh tpcds_5GB/
 
-      - name: Run benchmarks sequentially with warmup
+      - name: Setup benchmark environment and validate test jars
         run: |
           export JAVA_HOME=$JDK_HOME
           export PATH=$JAVA_HOME/bin:$PATH
@@ -214,8 +214,19 @@ jobs:
 
           echo "Using jars: $JARS_LIST"
 
-          # Warmup run (discard results)
-          echo ""
+          # Save environment variables for subsequent steps
+          echo "JDK_HOME=$JDK_HOME" >> $GITHUB_ENV
+          echo "TPCDS_DATA=$TPCDS_DATA" >> $GITHUB_ENV
+          echo "JARS_LIST=$JARS_LIST" >> $GITHUB_ENV
+          echo "SPARK_SQL_TEST_JAR=$SPARK_SQL_TEST_JAR" >> $GITHUB_ENV
+
+      - name: Warmup run (JIT warmup)
+        run: |
+          export JAVA_HOME=$JDK_HOME
+          export PATH=$JAVA_HOME/bin:$PATH
+
+          cd spark-src
+
           echo "========================================"
           echo "Warmup Run (JIT warmup)"
           echo "========================================"
@@ -233,13 +244,19 @@ jobs:
             --query-filter "q3" \
             > ../warmup.log 2>&1
 
-          echo "Warmup completed"
-          echo ""
+          echo "✅ Warmup completed"
 
-          # BASELINE benchmark (sequential, not background)
+      - name: Run BASELINE benchmark (Standard G1GC)
+        run: |
+          export JAVA_HOME=$JDK_HOME
+          export PATH=$JAVA_HOME/bin:$PATH
+
+          cd spark-src
+
           echo "========================================"
-          echo "TPC-DS Benchmark - BASELINE (Standard JDK)"
+          echo "TPC-DS Benchmark - BASELINE"
           echo "========================================"
+          echo "Configuration: Standard G1GC"
           echo "Start: $(date)"
 
           ./bin/spark-submit \
@@ -255,15 +272,20 @@ jobs:
             --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" \
             > ../benchmark-baseline.log 2>&1
 
-          BASELINE_EXIT=$?
           echo "End: $(date)"
-          echo "BASELINE completed with exit code: $BASELINE_EXIT"
-          echo ""
+          echo "✅ BASELINE benchmark completed"
 
-          # OPTIMIZED benchmark (sequential, runs after baseline)
+      - name: Run OPTIMIZED benchmark (Spark Optimizations)
+        run: |
+          export JAVA_HOME=$JDK_HOME
+          export PATH=$JAVA_HOME/bin:$PATH
+
+          cd spark-src
+
           echo "========================================"
-          echo "TPC-DS Benchmark - OPTIMIZED (Spark Optimizations)"
+          echo "TPC-DS Benchmark - OPTIMIZED"
           echo "========================================"
+          echo "Configuration: G1GC + Spark Optimizations"
           echo "Start: $(date)"
 
           ./bin/spark-submit \
@@ -279,23 +301,8 @@ jobs:
             --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" \
             > ../benchmark-optimized.log 2>&1
 
-          OPTIMIZED_EXIT=$?
           echo "End: $(date)"
-          echo "OPTIMIZED completed with exit code: $OPTIMIZED_EXIT"
-
-          # Show summary
-          echo ""
-          echo "========================================"
-          echo "Benchmark Execution Summary"
-          echo "========================================"
-          echo "BASELINE exit code: $BASELINE_EXIT"
-          echo "OPTIMIZED exit code: $OPTIMIZED_EXIT"
-
-          # Exit with error if either failed
-          if [ $BASELINE_EXIT -ne 0 ] || [ $OPTIMIZED_EXIT -ne 0 ]; then
-            echo "One or more benchmarks failed"
-            exit 1
-          fi
+          echo "✅ OPTIMIZED benchmark completed"
 
       - name: Checkout code for comparison script
         if: always()
