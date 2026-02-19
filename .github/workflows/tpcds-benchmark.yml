@@ -106,9 +106,11 @@ jobs:
             echo "Start: $(date)"
 
             ./bin/spark-submit \
-              --master local[*] \
+              --master local[2] \
               --driver-memory 4g \
-              --conf spark.driver.extraJavaOptions="-XX:+UseG1GC -Dlog4j.rootCategory=WARN,console" \
+              --conf spark.driver.extraJavaOptions="-XX:+UseG1GC" \
+              --conf spark.driver.log.level=WARN \
+              --conf spark.executor.log.level=WARN \
               --jars "$JARS_LIST" \
               --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
               "$SPARK_SQL_TEST_JAR" \
@@ -128,9 +130,11 @@ jobs:
             echo "Start: $(date)"
 
             ./bin/spark-submit \
-              --master local[*] \
+              --master local[2] \
               --driver-memory 4g \
-              --conf spark.driver.extraJavaOptions="-XX:+UseZGC -Dlog4j.rootCategory=WARN,console" \
+              --conf spark.driver.extraJavaOptions="-XX:+UseZGC" \
+              --conf spark.driver.log.level=WARN \
+              --conf spark.executor.log.level=WARN \
               --jars "$JARS_LIST" \
               --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
               "$SPARK_SQL_TEST_JAR" \
