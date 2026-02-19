@@ -241,8 +241,7 @@ jobs:
             --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
             "$SPARK_SQL_TEST_JAR" \
             --data-location "$TPCDS_DATA" \
-            --query-filter "q3" \
-            > ../warmup.log 2>&1
+            --query-filter "q3"
 
           echo "✅ Warmup completed"
 
