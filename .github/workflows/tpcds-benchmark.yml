@@ -26,6 +26,11 @@ on:
           - ERROR
           - WARN
           - INFO
+      query_filter:
+        description: 'TPC-DS queries to run (comma-separated)'
+        required: false
+        default: 'q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96'
+        type: string
 
 jobs:
   tpcds-benchmark:
@@ -33,23 +38,26 @@ jobs:
     timeout-minutes: 360  # 6 hours
 
     steps:
-      - name: Set JVM options
+      - name: Set benchmark configuration
         run: |
           # Use workflow inputs if provided, otherwise use defaults
           BASELINE_OPTS="${{ github.event.inputs.baseline_opts || '-Xms3g -XX:+UseG1GC -XX:+AlwaysPreTouch' }}"
           OPTIMIZED_OPTS="${{ github.event.inputs.optimized_opts || '-Xms3g -XX:+UseZGC -XX:+AlwaysPreTouch' }}"
           LOG_LEVEL="${{ github.event.inputs.log_level || 'ERROR' }}"
+          QUERY_FILTER="${{ github.event.inputs.query_filter || 'q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96' }}"
 
           echo "BASELINE_OPTS=$BASELINE_OPTS" >> $GITHUB_ENV
           echo "OPTIMIZED_OPTS=$OPTIMIZED_OPTS" >> $GITHUB_ENV
           echo "LOG_LEVEL=$LOG_LEVEL" >> $GITHUB_ENV
+          echo "QUERY_FILTER=$QUERY_FILTER" >> $GITHUB_ENV
 
           echo "=========================================="
-          echo "JVM Options Configuration"
+          echo "Benchmark Configuration"
           echo "=========================================="
           echo "Baseline opts (G1GC):  $BASELINE_OPTS"
           echo "Optimized opts (ZGC):  $OPTIMIZED_OPTS"
           echo "Log level:             $LOG_LEVEL"
+          echo "Query filter:          $QUERY_FILTER"
           echo "=========================================="
 
       - name: Install JDK 25
@@ -173,6 +181,7 @@ jobs:
           echo "TPC-DS Benchmark - G1GC (Baseline)"
           echo "========================================"
           echo "Configuration: $BASELINE_OPTS"
+          echo "Queries: $QUERY_FILTER"
           echo "Start: $(date)"
 
           ./bin/spark-submit \
@@ -184,31 +193,33 @@ jobs:
             --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
             "$SPARK_SQL_TEST_JAR" \
             --data-location "$TPCDS_DATA" \
-            --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" \
+            --query-filter "$QUERY_FILTER" \
             | tee ../benchmark-g1gc.log
 
           echo "End: $(date)"
           echo "✅ G1GC benchmark completed"
 
-      - name: Run ZGC benchmark
+      - name: Run ZGC benchmark (Optimized)
         run: |
           cd spark-src
 
           echo "========================================"
-          echo "TPC-DS Benchmark - ZGC"
+          echo "TPC-DS Benchmark - ZGC (Optimized)"
           echo "========================================"
+          echo "Configuration: $OPTIMIZED_OPTS"
+          echo "Queries: $QUERY_FILTER"
           echo "Start: $(date)"
 
           ./bin/spark-submit \
             --master local[1] \
             --driver-memory 3g \
-            --conf spark.driver.extraJavaOptions="-Xms3g -XX:+UseZGC -XX:+AlwaysPreTouch" \
-            --conf spark.log.level=ERROR \
+            --conf spark.driver.extraJavaOptions="$OPTIMIZED_OPTS" \
+            --conf spark.log.level="$LOG_LEVEL" \
             --jars "$JARS_LIST" \
             --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
             "$SPARK_SQL_TEST_JAR" \
             --data-location "$TPCDS_DATA" \
-            --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" \
+            --query-filter "$QUERY_FILTER" \
             | tee ../benchmark-zgc.log
 
           echo "End: $(date)"
