@@ -86,6 +86,7 @@ public:
   static void record_allocation_eliminated(const char* class_name, size_t size);
   static void record_scalar_replacement(const char* class_name, size_t field_count);
   static void record_stack_allocation(const char* class_name, size_t size);
+  static void record_deoptimization(const char* class_name, const char* reason);
   static void print_statistics();
 
   // Logging
@@ -103,8 +104,14 @@ private:
   static size_t _expression_eliminations;
   static size_t _bytes_saved;
 
+  // Deoptimization tracking for adaptive behavior
+  static size_t _deoptimization_count;
+  static size_t _optimization_attempts;
+  static bool _adaptive_mode_disabled;
+
   // Pattern matching helpers
   static bool matches_pattern(const char* str, const char* pattern);
+  static bool matches_exact_class(const char* class_name, const char* target_class);
   static bool is_spark_sql_package(const char* class_name);
 };
 

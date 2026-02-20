@@ -19,9 +19,9 @@ on:
         default: '-Xms3g -XX:+UseG1GC -XX:+AlwaysPreTouch'
         type: string
       optimized_opts:
-        description: 'Optimized JVM options (G1GC + Spark optimizations)'
+        description: 'Optimized JVM options (G1GC + Spark optimizations) - DISABLED by default due to -2.5% regression'
         required: false
-        default: '-Xms3g -XX:+UseG1GC -XX:+AlwaysPreTouch -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization'
+        default: '-Xms3g -XX:+UseG1GC -XX:+AlwaysPreTouch'
         type: string
       log_level:
         description: 'Spark log level (ERROR, WARN, INFO)'
@@ -47,7 +47,8 @@ jobs:
         run: |
           # Use workflow inputs if provided, otherwise use defaults
           BASELINE_OPTS="${{ github.event.inputs.baseline_opts || '-Xms3g -XX:+UseG1GC -XX:+AlwaysPreTouch' }}"
-          OPTIMIZED_OPTS="${{ github.event.inputs.optimized_opts || '-Xms3g -XX:+UseG1GC -XX:+AlwaysPreTouch -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization' }}"
+          # NOTE: Spark optimizations disabled by default due to -2.5% regression (q3: -43.9%)
+          OPTIMIZED_OPTS="${{ github.event.inputs.optimized_opts || '-Xms3g -XX:+UseG1GC -XX:+AlwaysPreTouch' }}"
           LOG_LEVEL="${{ github.event.inputs.log_level || 'ERROR' }}"
           QUERY_FILTER="${{ github.event.inputs.query_filter || 'q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96' }}"
 
@@ -257,7 +258,7 @@ jobs:
           echo "JARS_LIST=$JARS_LIST" >> $GITHUB_ENV
           echo "SPARK_SQL_TEST_JAR=$SPARK_SQL_TEST_JAR" >> $GITHUB_ENV
 
-      - name: Warmup run (JIT warmup)
+      - name: Warmup run (JIT warmup) - Uses baseline JVM options
         run: |
           export JAVA_HOME=$JDK_HOME
           export PATH=$JAVA_HOME/bin:$PATH
@@ -267,8 +268,9 @@ jobs:
           echo "========================================"
           echo "Warmup Run (JIT warmup)"
           echo "========================================"
-          echo "Running warmup with q3 to warm up JIT compiler..."
-          echo "Using baseline opts: $BASELINE_OPTS"
+          echo "JVM Options: $BASELINE_OPTS"
+          echo "Query: q3"
+          echo "========================================"
 
           ./bin/spark-submit \
             --master local[1] \
@@ -283,7 +285,7 @@ jobs:
 
           echo "✅ Warmup completed"
 
-      - name: Run BASELINE benchmark (Standard G1GC)
+      - name: Run BASELINE benchmark - Uses baseline JVM options
         run: |
           export JAVA_HOME=$JDK_HOME
           export PATH=$JAVA_HOME/bin:$PATH
@@ -293,9 +295,11 @@ jobs:
           echo "========================================"
           echo "TPC-DS Benchmark - BASELINE"
           echo "========================================"
-          echo "Configuration: $BASELINE_OPTS"
+          echo "JVM Options: $BASELINE_OPTS"
           echo "Queries: $QUERY_FILTER"
+          echo "Log Level: $LOG_LEVEL"
           echo "Start: $(date)"
+          echo "========================================"
 
           ./bin/spark-submit \
             --master local[1] \
@@ -312,7 +316,7 @@ jobs:
           echo "End: $(date)"
           echo "✅ BASELINE benchmark completed"
 
-      - name: Run OPTIMIZED benchmark (Spark Optimizations)
+      - name: Run OPTIMIZED benchmark - Uses optimized JVM options
         run: |
           export JAVA_HOME=$JDK_HOME
           export PATH=$JAVA_HOME/bin:$PATH
@@ -322,9 +326,11 @@ jobs:
           echo "========================================"
           echo "TPC-DS Benchmark - OPTIMIZED"
           echo "========================================"
-          echo "Configuration: $OPTIMIZED_OPTS"
+          echo "JVM Options: $OPTIMIZED_OPTS"
           echo "Queries: $QUERY_FILTER"
+          echo "Log Level: $LOG_LEVEL"
           echo "Start: $(date)"
+          echo "=========================================="
 
           ./bin/spark-submit \
             --master local[1] \

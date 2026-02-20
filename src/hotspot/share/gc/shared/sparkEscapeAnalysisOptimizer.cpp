@@ -38,6 +38,11 @@ size_t SparkEscapeAnalysisOptimizer::_iterator_eliminations = 0;
 size_t SparkEscapeAnalysisOptimizer::_expression_eliminations = 0;
 size_t SparkEscapeAnalysisOptimizer::_bytes_saved = 0;
 
+// Deoptimization tracking - adaptive behavior
+size_t SparkEscapeAnalysisOptimizer::_deoptimization_count = 0;
+size_t SparkEscapeAnalysisOptimizer::_optimization_attempts = 0;
+bool SparkEscapeAnalysisOptimizer::_adaptive_mode_disabled = false;
+
 bool SparkEscapeAnalysisOptimizer::is_enabled() {
   return G1OptimizeForSpark && G1SparkEnhanceEscapeAnalysis;
 }
@@ -72,6 +77,26 @@ bool SparkEscapeAnalysisOptimizer::matches_pattern(const char* str, const char* 
   return strstr(str, pattern) != nullptr;
 }
 
+bool SparkEscapeAnalysisOptimizer::matches_exact_class(const char* class_name, const char* target_class) {
+  if (class_name == nullptr || target_class == nullptr) {
+    return false;
+  }
+  // Match exact class name or class name with package prefix
+  const char* match = strstr(class_name, target_class);
+  if (match == nullptr) {
+    return false;
+  }
+  // Ensure it's not a partial match (e.g., "InternalRow" shouldn't match "MyInternalRowImpl")
+  // Check that the match is either at the start or preceded by '/' (package separator)
+  if (match != class_name && *(match - 1) != '/') {
+    return false;
+  }
+  // Check that the match ends the string or is followed by '$' (inner class) or ';' (end)
+  size_t target_len = strlen(target_class);
+  char next_char = match[target_len];
+  return next_char == '\0' || next_char == '$' || next_char == ';';
+}
+
 bool SparkEscapeAnalysisOptimizer::is_spark_sql_package(const char* class_name) {
   if (class_name == nullptr) {
     return false;
@@ -87,15 +112,16 @@ bool SparkEscapeAnalysisOptimizer::is_internal_row_class(const char* class_name)
     return false;
   }
 
-  // Match InternalRow implementations:
+  // Match SPECIFIC InternalRow implementations with exact matching:
   // - GenericInternalRow
   // - SpecificInternalRow
-  // - JoinedRow
-  // - MutableProjection
+  // - JoinedRow (often escapes, be conservative)
+  // - UnsafeRow (often escapes to storage)
+  //
+  // Use exact matching to avoid false positives
   return is_spark_sql_package(class_name) &&
-         (matches_pattern(class_name, "InternalRow") ||
-          matches_pattern(class_name, "JoinedRow") ||
-          matches_pattern(class_name, "MutableProjection"));
+         (matches_exact_class(class_name, "GenericInternalRow") ||
+          matches_exact_class(class_name, "SpecificInternalRow"));
 }
 
 bool SparkEscapeAnalysisOptimizer::is_iterator_wrapper_class(const char* class_name) {
@@ -158,23 +184,48 @@ bool SparkEscapeAnalysisOptimizer::is_likely_non_escaping_spark_object(const cha
     return false;
   }
 
-  // Small objects from Spark SQL packages are likely non-escaping
-  // Typical pattern: created in hot loop, used locally, discarded
+  // CRITICAL FIX: Check if adaptive mode has disabled optimizations due to high deopt rate
+  if (_adaptive_mode_disabled) {
+    log_trace(gc)("Spark EA: Disabled due to high deoptimization rate");
+    return false;
+  }
+
+  // CRITICAL FIX: Conservative approach - only optimize if deopt rate is acceptable
+  // If we've attempted many optimizations and have high deopt rate, back off
+  if (_optimization_attempts > 100) {
+    double deopt_rate = (double)_deoptimization_count / _optimization_attempts;
+    if (deopt_rate > 0.10) {  // More than 10% deopt rate is too high
+      _adaptive_mode_disabled = true;
+      log_warning(gc)("Spark EA: Disabling optimizations due to high deopt rate: %.1f%%",
+                      deopt_rate * 100);
+      return false;
+    }
+  }
+
+  // CRITICAL FIX: Be MUCH more conservative with size heuristic
+  // TPC-DS q3 workload showed that even small objects can escape and cause deopt
+  // Only optimize VERY small objects that are truly temporary
+  if (object_size > 256) {  // Reduced from 1KB to 256 bytes
+    return false;
+  }
+
   if (!is_spark_sql_package(class_name)) {
     return false;
   }
 
-  // Size heuristic: small objects (< 1KB) are more likely to be optimized
-  if (object_size > 1024) {
-    return false;
+  // CRITICAL FIX: Only optimize specific known-safe patterns
+  // Don't optimize based on vague patterns like "has Iterator in name"
+  // Only optimize exact matches that we're confident about
+  if (is_internal_row_class(class_name)) {
+    // Only very small InternalRow instances that are likely temporaries
+    if (object_size <= 128) {
+      _optimization_attempts++;
+      return true;
+    }
   }
 
-  // Check for known non-escaping patterns
-  if (is_internal_row_class(class_name) ||
-      is_iterator_wrapper_class(class_name) ||
-      is_expression_eval_class(class_name)) {
-    return true;
-  }
+  // CRITICAL FIX: Removed iterator and expression optimizations
+  // These caused regressions in TPC-DS q3, too many false positives
 
   return false;
 }
@@ -185,24 +236,33 @@ bool SparkEscapeAnalysisOptimizer::should_scalarize_aggressively(const char* cla
     return false;
   }
 
+  // CRITICAL FIX: Check adaptive mode before attempting scalar replacement
+  if (_adaptive_mode_disabled) {
+    return false;
+  }
+
   // Scalar replacement: replace object allocation with individual field values
   // Benefit: eliminates allocation entirely, fields become local variables
 
-  // Don't scalarize objects with too many fields
+  // CRITICAL FIX: Much more conservative threshold
+  // Don't scalarize objects with too many fields - overhead increases with field count
   if (field_count > G1SparkScalarReplacementThreshold) {
     return false;
   }
 
-  // Aggressively scalarize known Spark patterns
+  // CRITICAL FIX: Only scalarize VERY small objects
+  // TPC-DS q3 regression showed that aggressive scalarization causes deopt overhead
   if (is_internal_row_class(class_name)) {
-    // InternalRow with few fields: excellent candidate
-    return field_count <= 10;
+    // CRITICAL FIX: Reduced from <= 10 to <= 4 fields
+    // Only tiny InternalRow instances benefit, larger ones cause deopt
+    if (field_count <= 4) {
+      _optimization_attempts++;
+      return true;
+    }
   }
 
-  if (is_expression_eval_class(class_name)) {
-    // Expression temporaries: usually have few fields
-    return field_count <= 5;
-  }
+  // CRITICAL FIX: Removed expression eval scalarization
+  // Caused too many deoptimizations in real workloads
 
   return false;
 }
@@ -213,24 +273,30 @@ bool SparkEscapeAnalysisOptimizer::should_attempt_stack_allocation(const char* c
     return false;
   }
 
+  // CRITICAL FIX: Check adaptive mode
+  if (_adaptive_mode_disabled) {
+    return false;
+  }
+
   // Stack allocation: allocate on stack instead of heap
   // Benefit: no GC overhead, faster allocation/deallocation
 
-  // Size limit for stack allocation
+  // CRITICAL FIX: Conservative size limit
+  // Stack allocation has overhead and can cause deopt if assumptions fail
   if (object_size > G1SparkStackAllocationLimit) {
     return false;
   }
 
-  // Stack allocation for known non-escaping patterns
-  if (is_internal_row_class(class_name) && object_size <= 256) {
-    // Small InternalRow instances
+  // CRITICAL FIX: Only attempt stack allocation for VERY small, confirmed-safe objects
+  // TPC-DS q3 showed that aggressive stack allocation causes regression
+  if (is_internal_row_class(class_name) && object_size <= 64) {
+    // CRITICAL FIX: Reduced from 256 to 64 bytes - only tiny temporary rows
+    _optimization_attempts++;
     return true;
   }
 
-  if (is_iterator_wrapper_class(class_name) && object_size <= 128) {
-    // Small iterator wrappers
-    return true;
-  }
+  // CRITICAL FIX: Removed iterator wrapper stack allocation
+  // Iterators often escape or have complex lifecycle, caused deopt
 
   return false;
 }
@@ -271,16 +337,47 @@ void SparkEscapeAnalysisOptimizer::record_stack_allocation(const char* class_nam
                 class_name, size);
 }
 
+void SparkEscapeAnalysisOptimizer::record_deoptimization(const char* class_name,
+                                                          const char* reason) {
+  _deoptimization_count++;
+
+  log_debug(gc)("Spark EA: Deoptimization of %s, reason: %s (total deopts: %zu, attempts: %zu)",
+                class_name, reason, _deoptimization_count, _optimization_attempts);
+
+  // Check if we should disable adaptive mode
+  if (_optimization_attempts > 50) {
+    double deopt_rate = (double)_deoptimization_count / _optimization_attempts;
+    if (deopt_rate > 0.15) {
+      _adaptive_mode_disabled = true;
+      log_warning(gc)("Spark EA: DISABLING optimizations due to high deopt rate: %.1f%% (%zu deopts / %zu attempts)",
+                      deopt_rate * 100, _deoptimization_count, _optimization_attempts);
+    }
+  }
+}
+
 void SparkEscapeAnalysisOptimizer::print_statistics() {
   if (!is_enabled()) {
     return;
   }
 
+  // Print statistics even if no allocations eliminated - show deopt info
+  log_info(gc)("Spark Escape Analysis Statistics:");
+  log_info(gc)("  Optimization attempts: %zu", _optimization_attempts);
+  log_info(gc)("  Deoptimizations: %zu", _deoptimization_count);
+
+  if (_optimization_attempts > 0) {
+    double deopt_rate = 100.0 * _deoptimization_count / _optimization_attempts;
+    log_info(gc)("  Deoptimization rate: %.1f%%", deopt_rate);
+    if (_adaptive_mode_disabled) {
+      log_info(gc)("  Adaptive mode: DISABLED (high deopt rate)");
+    }
+  }
+
   if (_total_allocations_eliminated == 0) {
+    log_info(gc)("  No allocations eliminated");
     return;
   }
 
-  log_info(gc)("Spark Escape Analysis Statistics:");
   log_info(gc)("  Total allocations eliminated: %zu",
                _total_allocations_eliminated);
   log_info(gc)("  Bytes saved: %zu (%.2f MB)",

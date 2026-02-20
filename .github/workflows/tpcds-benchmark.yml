@@ -150,15 +150,16 @@ jobs:
           echo "JARS_LIST=$JARS_LIST" >> $GITHUB_ENV
           echo "SPARK_SQL_TEST_JAR=$SPARK_SQL_TEST_JAR" >> $GITHUB_ENV
 
-      - name: Warmup run (JIT warmup)
+      - name: Warmup run (JIT warmup) - Uses baseline JVM options
         run: |
           cd spark-src
 
           echo "========================================"
           echo "Warmup Run (JIT warmup)"
           echo "========================================"
-          echo "Running warmup with q3 to warm up JIT compiler..."
-          echo "Using baseline opts: $BASELINE_OPTS"
+          echo "JVM Options: $BASELINE_OPTS"
+          echo "Query: q3"
+          echo "========================================"
 
           ./bin/spark-submit \
             --master local[1] \
@@ -173,16 +174,18 @@ jobs:
 
           echo "✅ Warmup completed"
 
-      - name: Run G1GC benchmark (Baseline)
+      - name: Run G1GC benchmark - Uses baseline JVM options
         run: |
           cd spark-src
 
           echo "========================================"
           echo "TPC-DS Benchmark - G1GC (Baseline)"
           echo "========================================"
-          echo "Configuration: $BASELINE_OPTS"
+          echo "JVM Options: $BASELINE_OPTS"
           echo "Queries: $QUERY_FILTER"
+          echo "Log Level: $LOG_LEVEL"
           echo "Start: $(date)"
+          echo "=========================================="
 
           ./bin/spark-submit \
             --master local[1] \
@@ -199,16 +202,18 @@ jobs:
           echo "End: $(date)"
           echo "✅ G1GC benchmark completed"
 
-      - name: Run ZGC benchmark (Optimized)
+      - name: Run ZGC benchmark - Uses optimized JVM options
         run: |
           cd spark-src
 
           echo "========================================"
           echo "TPC-DS Benchmark - ZGC (Optimized)"
           echo "========================================"
-          echo "Configuration: $OPTIMIZED_OPTS"
+          echo "JVM Options: $OPTIMIZED_OPTS"
           echo "Queries: $QUERY_FILTER"
+          echo "Log Level: $LOG_LEVEL"
           echo "Start: $(date)"
+          echo "=========================================="
 
           ./bin/spark-submit \
             --master local[1] \
