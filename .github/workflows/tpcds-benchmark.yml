@@ -6,6 +6,26 @@ on:
       - main
       - spark
   workflow_dispatch:
+    inputs:
+      baseline_opts:
+        description: 'Baseline JVM options (G1GC)'
+        required: false
+        default: '-Xms3g -XX:+UseG1GC -XX:+AlwaysPreTouch'
+        type: string
+      optimized_opts:
+        description: 'Optimized JVM options (ZGC)'
+        required: false
+        default: '-Xms3g -XX:+UseZGC -XX:+AlwaysPreTouch'
+        type: string
+      log_level:
+        description: 'Spark log level (ERROR, WARN, INFO)'
+        required: false
+        default: 'ERROR'
+        type: choice
+        options:
+          - ERROR
+          - WARN
+          - INFO
 
 jobs:
   tpcds-benchmark:
@@ -13,6 +33,25 @@ jobs:
     timeout-minutes: 360  # 6 hours
 
     steps:
+      - name: Set JVM options
+        run: |
+          # Use workflow inputs if provided, otherwise use defaults
+          BASELINE_OPTS="${{ github.event.inputs.baseline_opts || '-Xms3g -XX:+UseG1GC -XX:+AlwaysPreTouch' }}"
+          OPTIMIZED_OPTS="${{ github.event.inputs.optimized_opts || '-Xms3g -XX:+UseZGC -XX:+AlwaysPreTouch' }}"
+          LOG_LEVEL="${{ github.event.inputs.log_level || 'ERROR' }}"
+
+          echo "BASELINE_OPTS=$BASELINE_OPTS" >> $GITHUB_ENV
+          echo "OPTIMIZED_OPTS=$OPTIMIZED_OPTS" >> $GITHUB_ENV
+          echo "LOG_LEVEL=$LOG_LEVEL" >> $GITHUB_ENV
+
+          echo "=========================================="
+          echo "JVM Options Configuration"
+          echo "=========================================="
+          echo "Baseline opts (G1GC):  $BASELINE_OPTS"
+          echo "Optimized opts (ZGC):  $OPTIMIZED_OPTS"
+          echo "Log level:             $LOG_LEVEL"
+          echo "=========================================="
+
       - name: Install JDK 25
         uses: actions/setup-java@v4
         with:
@@ -111,12 +150,13 @@ jobs:
           echo "Warmup Run (JIT warmup)"
           echo "========================================"
           echo "Running warmup with q3 to warm up JIT compiler..."
+          echo "Using baseline opts: $BASELINE_OPTS"
 
           ./bin/spark-submit \
             --master local[1] \
             --driver-memory 3g \
-            --conf spark.driver.extraJavaOptions="-Xms3g -XX:+UseG1GC -XX:+AlwaysPreTouch" \
-            --conf spark.log.level=ERROR \
+            --conf spark.driver.extraJavaOptions="$BASELINE_OPTS" \
+            --conf spark.log.level="$LOG_LEVEL" \
             --jars "$JARS_LIST" \
             --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
             "$SPARK_SQL_TEST_JAR" \
@@ -125,20 +165,21 @@ jobs:
 
           echo "✅ Warmup completed"
 
-      - name: Run G1GC benchmark
+      - name: Run G1GC benchmark (Baseline)
         run: |
           cd spark-src
 
           echo "========================================"
-          echo "TPC-DS Benchmark - G1GC"
+          echo "TPC-DS Benchmark - G1GC (Baseline)"
           echo "========================================"
+          echo "Configuration: $BASELINE_OPTS"
           echo "Start: $(date)"
 
           ./bin/spark-submit \
             --master local[1] \
             --driver-memory 3g \
-            --conf spark.driver.extraJavaOptions="-Xms3g -XX:+UseG1GC -XX:+AlwaysPreTouch" \
-            --conf spark.log.level=ERROR \
+            --conf spark.driver.extraJavaOptions="$BASELINE_OPTS" \
+            --conf spark.log.level="$LOG_LEVEL" \
             --jars "$JARS_LIST" \
             --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
             "$SPARK_SQL_TEST_JAR" \
