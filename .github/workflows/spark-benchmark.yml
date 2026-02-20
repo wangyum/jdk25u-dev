@@ -37,6 +37,11 @@ on:
         required: false
         default: 'q3,q4,q7,q19,q23a,q24a,q27,q42,q43,q52,q55,q63,q65,q67,q68,q73,q79,a95,q96'
         type: string
+      driver_memory:
+        description: 'Spark driver memory (e.g., 3g, 8g, 16g)'
+        required: false
+        default: '3g'
+        type: string
 
 jobs:
   benchmark-pipeline:
@@ -51,11 +56,13 @@ jobs:
           OPTIMIZED_OPTS="${{ github.event.inputs.optimized_opts || '-Xms3g -XX:+UseG1GC -XX:+AlwaysPreTouch' }}"
           LOG_LEVEL="${{ github.event.inputs.log_level || 'ERROR' }}"
           QUERY_FILTER="${{ github.event.inputs.query_filter || 'q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96' }}"
+          DRIVER_MEMORY="${{ github.event.inputs.driver_memory || '3g' }}"
 
           echo "BASELINE_OPTS=$BASELINE_OPTS" >> $GITHUB_ENV
           echo "OPTIMIZED_OPTS=$OPTIMIZED_OPTS" >> $GITHUB_ENV
           echo "LOG_LEVEL=$LOG_LEVEL" >> $GITHUB_ENV
           echo "QUERY_FILTER=$QUERY_FILTER" >> $GITHUB_ENV
+          echo "DRIVER_MEMORY=$DRIVER_MEMORY" >> $GITHUB_ENV
 
           echo "=========================================="
           echo "Benchmark Configuration"
@@ -274,7 +281,7 @@ jobs:
 
           ./bin/spark-submit \
             --master local[1] \
-            --driver-memory 3g \
+            --driver-memory $DRIVER_MEMORY \
             --conf spark.driver.extraJavaOptions="$BASELINE_OPTS" \
             --conf spark.log.level="$LOG_LEVEL" \
             --jars "$JARS_LIST" \
@@ -303,7 +310,7 @@ jobs:
 
           ./bin/spark-submit \
             --master local[1] \
-            --driver-memory 3g \
+            --driver-memory $DRIVER_MEMORY \
             --conf spark.driver.extraJavaOptions="$BASELINE_OPTS" \
             --conf spark.log.level="$LOG_LEVEL" \
             --jars "$JARS_LIST" \
@@ -334,7 +341,7 @@ jobs:
 
           ./bin/spark-submit \
             --master local[1] \
-            --driver-memory 3g \
+            --driver-memory $DRIVER_MEMORY \
             --conf spark.driver.extraJavaOptions="$OPTIMIZED_OPTS" \
             --conf spark.log.level="$LOG_LEVEL" \
             --jars "$JARS_LIST" \
