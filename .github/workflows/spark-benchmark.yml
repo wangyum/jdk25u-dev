@@ -13,21 +13,58 @@ on:
       - main
   workflow_dispatch:
     inputs:
-      benchmark_scale:
-        description: 'Benchmark scale factor (small/medium/large)'
+      baseline_opts:
+        description: 'Baseline JVM options (Standard G1GC)'
         required: false
-        default: 'small'
+        default: '-Xms3g -XX:+UseG1GC -XX:+AlwaysPreTouch'
+        type: string
+      optimized_opts:
+        description: 'Optimized JVM options (G1GC + Spark optimizations)'
+        required: false
+        default: '-Xms3g -XX:+UseG1GC -XX:+AlwaysPreTouch -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization'
+        type: string
+      log_level:
+        description: 'Spark log level (ERROR, WARN, INFO)'
+        required: false
+        default: 'ERROR'
         type: choice
         options:
-          - small
-          - medium
-          - large
+          - ERROR
+          - WARN
+          - INFO
+      query_filter:
+        description: 'TPC-DS queries to run (comma-separated)'
+        required: false
+        default: 'q3,q4,q7,q19,q23a,q24a,q27,q42,q43,q52,q55,q63,q65,q67,q68,q73,q79,a95,q96'
+        type: string
 
 jobs:
   benchmark-pipeline:
     runs-on: ubuntu-22.04
     timeout-minutes: 720  # 12 hours total (2h JDK + 2h Spark + 6h benchmarks + buffer)
     steps:
+      - name: Set benchmark configuration
+        run: |
+          # Use workflow inputs if provided, otherwise use defaults
+          BASELINE_OPTS="${{ github.event.inputs.baseline_opts || '-Xms3g -XX:+UseG1GC -XX:+AlwaysPreTouch' }}"
+          OPTIMIZED_OPTS="${{ github.event.inputs.optimized_opts || '-Xms3g -XX:+UseG1GC -XX:+AlwaysPreTouch -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization' }}"
+          LOG_LEVEL="${{ github.event.inputs.log_level || 'ERROR' }}"
+          QUERY_FILTER="${{ github.event.inputs.query_filter || 'q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96' }}"
+
+          echo "BASELINE_OPTS=$BASELINE_OPTS" >> $GITHUB_ENV
+          echo "OPTIMIZED_OPTS=$OPTIMIZED_OPTS" >> $GITHUB_ENV
+          echo "LOG_LEVEL=$LOG_LEVEL" >> $GITHUB_ENV
+          echo "QUERY_FILTER=$QUERY_FILTER" >> $GITHUB_ENV
+
+          echo "=========================================="
+          echo "Benchmark Configuration"
+          echo "=========================================="
+          echo "Baseline opts:   $BASELINE_OPTS"
+          echo "Optimized opts:  $OPTIMIZED_OPTS"
+          echo "Log level:       $LOG_LEVEL"
+          echo "Query filter:    $QUERY_FILTER"
+          echo "=========================================="
+
       - name: Checkout JDK code
         uses: actions/checkout@v4
         with:
@@ -231,12 +268,13 @@ jobs:
           echo "Warmup Run (JIT warmup)"
           echo "========================================"
           echo "Running warmup with q3 to warm up JIT compiler..."
+          echo "Using baseline opts: $BASELINE_OPTS"
 
           ./bin/spark-submit \
             --master local[1] \
             --driver-memory 3g \
-            --conf spark.driver.extraJavaOptions="-Xms3g -XX:+UseG1GC -XX:+AlwaysPreTouch" \
-            --conf spark.log.level=ERROR \
+            --conf spark.driver.extraJavaOptions="$BASELINE_OPTS" \
+            --conf spark.log.level="$LOG_LEVEL" \
             --jars "$JARS_LIST" \
             --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
             "$SPARK_SQL_TEST_JAR" \
@@ -255,19 +293,20 @@ jobs:
           echo "========================================"
           echo "TPC-DS Benchmark - BASELINE"
           echo "========================================"
-          echo "Configuration: Standard G1GC"
+          echo "Configuration: $BASELINE_OPTS"
+          echo "Queries: $QUERY_FILTER"
           echo "Start: $(date)"
 
           ./bin/spark-submit \
             --master local[1] \
             --driver-memory 3g \
-            --conf spark.driver.extraJavaOptions="-Xms3g -XX:+UseG1GC -XX:+AlwaysPreTouch" \
-            --conf spark.log.level=ERROR \
+            --conf spark.driver.extraJavaOptions="$BASELINE_OPTS" \
+            --conf spark.log.level="$LOG_LEVEL" \
             --jars "$JARS_LIST" \
             --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
             "$SPARK_SQL_TEST_JAR" \
             --data-location "$TPCDS_DATA" \
-            --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" \
+            --query-filter "$QUERY_FILTER" \
             | tee ../benchmark-baseline.log
 
           echo "End: $(date)"
@@ -283,19 +322,20 @@ jobs:
           echo "========================================"
           echo "TPC-DS Benchmark - OPTIMIZED"
           echo "========================================"
-          echo "Configuration: G1GC + Spark Optimizations"
+          echo "Configuration: $OPTIMIZED_OPTS"
+          echo "Queries: $QUERY_FILTER"
           echo "Start: $(date)"
 
           ./bin/spark-submit \
             --master local[1] \
             --driver-memory 3g \
-            --conf spark.driver.extraJavaOptions="-Xms3g -XX:+UseG1GC -XX:+AlwaysPreTouch -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization" \
-            --conf spark.log.level=ERROR \
+            --conf spark.driver.extraJavaOptions="$OPTIMIZED_OPTS" \
+            --conf spark.log.level="$LOG_LEVEL" \
             --jars "$JARS_LIST" \
             --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
             "$SPARK_SQL_TEST_JAR" \
             --data-location "$TPCDS_DATA" \
-            --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" \
+            --query-filter "$QUERY_FILTER" \
             | tee ../benchmark-optimized.log
 
           echo "End: $(date)"
