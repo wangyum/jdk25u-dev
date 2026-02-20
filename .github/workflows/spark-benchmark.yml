@@ -409,4 +409,5 @@ jobs:
             benchmark-optimized.log
             comparison_output.txt
             comparison_results.txt
+            /tmp/q4_hotspot_*.log
           retention-days: 30
