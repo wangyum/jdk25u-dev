@@ -235,7 +235,7 @@ jobs:
           ./bin/spark-submit \
             --master local[1] \
             --driver-memory 3g \
-            --conf spark.driver.extraJavaOptions="-Xms3g -Xmx3g -XX:+UseG1GC -XX:+AlwaysPreTouch" \
+            --conf spark.driver.extraJavaOptions="-Xms3g -XX:+UseG1GC -XX:+AlwaysPreTouch" \
             --conf spark.driver.log.level=ERROR \
             --jars "$JARS_LIST" \
             --class org.apache.spark.sql.execution.benchmark.TPCDSQueryBenchmark \
@@ -261,7 +261,7 @@ jobs:
           ./bin/spark-submit \
             --master local[1] \
             --driver-memory 3g \
-            --conf spark.driver.extraJavaOptions="-Xms3g -Xmx3g -XX:+UseG1GC -XX:+AlwaysPreTouch" \
+            --conf spark.driver.extraJavaOptions="-Xms3g -XX:+UseG1GC -XX:+AlwaysPreTouch" \
             --conf spark.driver.log.level=WARN \
             --conf spark.executor.log.level=WARN \
             --jars "$JARS_LIST" \
@@ -269,7 +269,7 @@ jobs:
             "$SPARK_SQL_TEST_JAR" \
             --data-location "$TPCDS_DATA" \
             --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" \
-            > ../benchmark-baseline.log 2>&1
+            | tee ../benchmark-baseline.log
 
           echo "End: $(date)"
           echo "✅ BASELINE benchmark completed"
@@ -290,7 +290,7 @@ jobs:
           ./bin/spark-submit \
             --master local[1] \
             --driver-memory 3g \
-            --conf spark.driver.extraJavaOptions="-Xms3g -Xmx3g -XX:+UseG1GC -XX:+AlwaysPreTouch -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization" \
+            --conf spark.driver.extraJavaOptions="-Xms3g -XX:+UseG1GC -XX:+AlwaysPreTouch -XX:+UnlockExperimentalVMOptions -XX:+G1OptimizeForSpark -XX:+G1SparkEnhanceEscapeAnalysis -XX:+G1SparkOptimizeHashOperations -XX:+G1SparkEnableVectorization" \
             --conf spark.driver.log.level=WARN \
             --conf spark.executor.log.level=WARN \
             --jars "$JARS_LIST" \
@@ -298,7 +298,7 @@ jobs:
             "$SPARK_SQL_TEST_JAR" \
             --data-location "$TPCDS_DATA" \
             --query-filter "q3,q7,q19,q27,q42,q43,q52,q55,q63,q65,q68,q73,q79,q96" \
-            > ../benchmark-optimized.log 2>&1
+            | tee ../benchmark-optimized.log
 
           echo "End: $(date)"
           echo "✅ OPTIMIZED benchmark completed"
