@@ -1,0 +1,79 @@
+# Q4 Profile-Guided Optimization - Compile Commands
+# Based on JIT compilation log analysis from Phase 1 profiling
+#
+# Strategy: Force inline the hottest codegen aggregation methods
+# These methods are called 8-13 times each during compilation,
+# indicating they are critical hot paths for Q4 performance
+#
+# Top targets: GeneratedIteratorForCodegenStage20-24 (hash aggregations)
+
+# === HOTTEST METHODS - Force inline (Top Priority) ===
+
+# processNext methods (stages 20-24) - main iteration loop
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage20::processNext
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage21::processNext
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage22::processNext
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage23::processNext
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage24::processNext
+
+# hashAgg_doAggregateWithKeys - critical aggregation with keys
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage20::hashAgg_doAggregateWithKeys_0$
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage21::hashAgg_doAggregateWithKeys_0$
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage22::hashAgg_doAggregateWithKeys_0$
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage23::hashAgg_doAggregateWithKeys_0$
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage24::hashAgg_doAggregateWithKeys_0$
+
+# hashAgg_doAggregate_sum - SUM aggregation hot path
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage20::hashAgg_doAggregate_sum_0$
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage22::hashAgg_doAggregate_sum_0$
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage23::hashAgg_doAggregate_sum_0$
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage24::hashAgg_doAggregate_sum_0$
+
+# hashAgg_doAggregateWithKeysOutput - output generation
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage20::hashAgg_doAggregateWithKeysOutput_0$
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage22::hashAgg_doAggregateWithKeysOutput_0$
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage23::hashAgg_doAggregateWithKeysOutput_0$
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage24::hashAgg_doAggregateWithKeysOutput_0$
+
+# hashAgg_doConsume - consume rows into aggregation
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage20::hashAgg_doConsume_0$
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage22::hashAgg_doConsume_0$
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage23::hashAgg_doConsume_0$
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage24::hashAgg_doConsume_0$
+
+# === MEDIUM PRIORITY ===
+
+# Stage 1, 14, 19 - also hot
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage1::processNext
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage1::hashAgg_doAggregateWithoutKey_0$
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage14::hashAgg_doAggregateWithKeys_0$
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage19::processNext
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage19::hashAgg_doConsume_0$
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage19::hashAgg_doAggregate_sum_0$
+
+# UnsafeProjection - row transformation
+inline org/apache/spark/sql/catalyst/expressions/GeneratedClass$SpecificUnsafeProjection::apply
+
+# === SUPPORTING INFRASTRUCTURE ===
+
+# UnsafeFixedWidthAggregationMap - hash table lookup
+inline org/apache/spark/sql/execution/UnsafeFixedWidthAggregationMap::getAggregationBufferFromUnsafeRow
+
+# UnsafeHashedRelation - join hash table
+inline org/apache/spark/sql/execution/joins/UnsafeHashedRelation::write
+
+# RecordReaderIterator - data reading
+inline org/apache/spark/sql/execution/datasources/RecordReaderIterator::hasNext
+
+# Parquet vectorized reading
+inline org/apache/spark/sql/execution/datasources/parquet/VectorizedRleValuesReader::readBatchInternal
+
+# === COMPILE EARLIER ===
+# Ensure hot methods compile at low threshold
+
+CompileThreshold,org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage20::*,500
+CompileThreshold,org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage22::*,500
+CompileThreshold,org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage23::*,500
+CompileThreshold,org/apache/spark/sql/catalyst/expressions/GeneratedClass$GeneratedIteratorForCodegenStage24::*,500
+
+# END OF COMPILE COMMANDS
